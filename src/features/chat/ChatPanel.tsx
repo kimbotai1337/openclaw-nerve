@@ -174,7 +174,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         setAutoScroll(false);
       }
     }
-  }, [search.currentMatch, search.currentMatchIndex, collapsed]);
+  }, [search.currentMatch, search.currentMatchIndex, collapsed, messages]);
 
   // Track unread messages when scrolled up
   useEffect(() => {

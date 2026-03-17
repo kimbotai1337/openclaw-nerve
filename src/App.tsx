@@ -330,14 +330,11 @@ export default function App({ onLogout }: AppProps) {
     prevLogCount.current = currentCount;
   }, [agentLogEntries.length]);
 
-  useEffect(() => {
-    if (!isCompactLayout && isMobileTopBarHidden) {
-      setIsMobileTopBarHidden(false);
-    }
-  }, [isCompactLayout, isMobileTopBarHidden]);
-
   const handleCompactLayoutChange = useCallback((nextIsCompactLayout: boolean) => {
     setIsCompactLayout(nextIsCompactLayout);
+    if (!nextIsCompactLayout) {
+      setIsMobileTopBarHidden(false);
+    }
     setFileBrowserCollapsedState(prevCollapsed => {
       if (nextIsCompactLayout) {
         persistDesktopFileBrowserCollapsed(prevCollapsed);
