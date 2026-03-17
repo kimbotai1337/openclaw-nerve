@@ -12,6 +12,7 @@ vi.mock('./useModelEffort', () => ({
 const mockOnReset = vi.fn();
 const mockOnAbort = vi.fn();
 const mockOnToggleFileBrowser = vi.fn();
+const mockOnToggleMobileTopBar = vi.fn();
 
 const defaultMockHook = {
   modelOptions: [
@@ -71,6 +72,26 @@ describe('ChatHeader', () => {
     expect(expandButton).toHaveAttribute('title', 'Open file explorer (Ctrl+B)');
   });
 
+  it('shows the stacked mobile chrome control when top bar toggle is provided', () => {
+    const mockUseModelEffort = vi.mocked(useModelEffort);
+    mockUseModelEffort.mockReturnValue(defaultMockHook);
+
+    render(
+      <ChatHeader
+        onReset={mockOnReset}
+        onAbort={mockOnAbort}
+        isGenerating={false}
+        onToggleFileBrowser={mockOnToggleFileBrowser}
+        isFileBrowserCollapsed={true}
+        onToggleMobileTopBar={mockOnToggleMobileTopBar}
+        isMobileTopBarHidden={false}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /hide header controls/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open file explorer/i })).toBeInTheDocument();
+  });
+
   it('does not show the expand button when not provided', () => {
     const mockUseModelEffort = vi.mocked(useModelEffort);
     mockUseModelEffort.mockReturnValue(defaultMockHook);
@@ -102,6 +123,29 @@ describe('ChatHeader', () => {
     const expandButton = screen.getByRole('button', { name: /open file explorer/i });
     fireEvent.click(expandButton);
 
+    expect(mockOnToggleFileBrowser).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls both mobile chrome actions when the stacked control is used', () => {
+    const mockUseModelEffort = vi.mocked(useModelEffort);
+    mockUseModelEffort.mockReturnValue(defaultMockHook);
+
+    render(
+      <ChatHeader
+        onReset={mockOnReset}
+        onAbort={mockOnAbort}
+        isGenerating={false}
+        onToggleFileBrowser={mockOnToggleFileBrowser}
+        isFileBrowserCollapsed={true}
+        onToggleMobileTopBar={mockOnToggleMobileTopBar}
+        isMobileTopBarHidden={true}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show header controls/i }));
+    fireEvent.click(screen.getByRole('button', { name: /open file explorer/i }));
+
+    expect(mockOnToggleMobileTopBar).toHaveBeenCalledTimes(1);
     expect(mockOnToggleFileBrowser).toHaveBeenCalledTimes(1);
   });
 

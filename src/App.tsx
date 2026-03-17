@@ -180,6 +180,7 @@ export default function App({ onLogout }: AppProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [booted, setBooted] = useState(false);
   const [logGlow, setLogGlow] = useState(false);
+  const [isMobileTopBarHidden, setIsMobileTopBarHidden] = useState(false);
   const [desktopRightPanelWidth, setDesktopRightPanelWidth] = useState<number | null>(null);
   const prevLogCount = useRef(0);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
@@ -222,6 +223,10 @@ export default function App({ onLogout }: AppProps) {
     setPendingTaskId(taskId);
     setViewMode('kanban');
   }, [setViewMode]);
+
+  const toggleMobileTopBar = useCallback(() => {
+    setIsMobileTopBarHidden((prev) => !prev);
+  }, []);
 
   // Build command list with stable references
   const openSettings = useCallback(() => setSettingsOpen(true), []);
@@ -325,6 +330,12 @@ export default function App({ onLogout }: AppProps) {
     prevLogCount.current = currentCount;
   }, [agentLogEntries.length]);
 
+  useEffect(() => {
+    if (!isCompactLayout && isMobileTopBarHidden) {
+      setIsMobileTopBarHidden(false);
+    }
+  }, [isCompactLayout, isMobileTopBarHidden]);
+
   const handleCompactLayoutChange = useCallback((nextIsCompactLayout: boolean) => {
     setIsCompactLayout(nextIsCompactLayout);
     setFileBrowserCollapsedState(prevCollapsed => {
@@ -415,7 +426,10 @@ export default function App({ onLogout }: AppProps) {
             agentName={currentSessionDisplayName}
             loadMore={loadMore}
             hasMore={hasMore}
-            onToggleFileBrowser={fileBrowserCollapsed ? handleToggleFileBrowser : undefined}
+            onToggleFileBrowser={isCompactLayout ? handleToggleFileBrowser : fileBrowserCollapsed ? handleToggleFileBrowser : undefined}
+            isFileBrowserCollapsed={fileBrowserCollapsed}
+            onToggleMobileTopBar={isCompactLayout ? toggleMobileTopBar : undefined}
+            isMobileTopBarHidden={isMobileTopBarHidden}
           />
         </PanelErrorBoundary>
       }
@@ -550,20 +564,22 @@ export default function App({ onLogout }: AppProps) {
         </button>
       )}
       
-      <TopBar
-        onSettings={openSettings}
-        agentLogEntries={agentLogEntries}
-        tokenData={tokenData}
-        logGlow={logGlow}
-        eventEntries={eventEntries}
-        eventsVisible={eventsVisible}
-        logVisible={logVisible}
-        mobilePanelButtonsVisible={isCompactLayout}
-        sessionsPanel={compactSessionsPanel}
-        workspacePanel={compactWorkspacePanel}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-      />
+      {(!isCompactLayout || !isMobileTopBarHidden) && (
+        <TopBar
+          onSettings={openSettings}
+          agentLogEntries={agentLogEntries}
+          tokenData={tokenData}
+          logGlow={logGlow}
+          eventEntries={eventEntries}
+          eventsVisible={eventsVisible}
+          logVisible={logVisible}
+          mobilePanelButtonsVisible={isCompactLayout}
+          sessionsPanel={compactSessionsPanel}
+          workspacePanel={compactWorkspacePanel}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
+      )}
       
       <PanelErrorBoundary name="Settings">
         <Suspense fallback={null}>
@@ -626,7 +642,7 @@ export default function App({ onLogout }: AppProps) {
               onClick={() => setFileBrowserCollapsed(true)}
               aria-label="Close file explorer"
             />
-            <div className="pointer-events-none fixed inset-0 z-40 hidden px-2 pt-[4.5rem] pb-[4.25rem] max-[900px]:flex">
+            <div className={`pointer-events-none fixed inset-0 z-40 hidden px-2 pb-[4.25rem] max-[900px]:flex ${isMobileTopBarHidden ? 'pt-2' : 'pt-[4.5rem]'}`}>
               <div className="pointer-events-auto h-full w-[min(86vw,320px)] max-w-full animate-in slide-in-from-left-4 duration-200">
                 <PanelErrorBoundary name="File Explorer">
                   <FileTreePanel
