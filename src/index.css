@@ -528,6 +528,13 @@
   }
 }
 
+@media (max-width: 371px) {
+  .topbar-mobile-compact .shell-chip,
+  .topbar-mobile-compact .shell-icon-button {
+    min-height: 38px;
+  }
+}
+
 .cockpit-field {
   display: flex;
   flex-direction: column;

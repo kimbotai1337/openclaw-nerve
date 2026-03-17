@@ -230,7 +230,7 @@ export function TopBar({
 
   return (
     <div className="relative z-40 px-2 pt-2 sm:px-4 sm:pt-3">
-      <header className="shell-panel flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl px-3 py-2 shrink-0 max-[371px]:gap-x-1.5 max-[371px]:px-2 sm:flex-nowrap sm:px-4">
+      <header className="topbar-mobile-compact shell-panel flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl px-3 py-2 shrink-0 max-[371px]:gap-x-1.5 max-[371px]:px-2 sm:flex-nowrap sm:px-4">
         <div className="flex min-w-0 items-center gap-3 max-[371px]:gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-background/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] max-[371px]:h-9 max-[371px]:w-9">
             <NerveLogo size={24} />
