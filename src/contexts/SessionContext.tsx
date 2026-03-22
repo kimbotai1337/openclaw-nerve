@@ -20,7 +20,8 @@ const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'starte
 const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed']);
 
 // sessions.list query defaults.
-// Wider window + higher cap avoids dropping subagents from the sidebar in busy workspaces.
+// Keep spawn/discovery polling on a recent active-window query, but use the
+// full session list for the sidebar so older root chats stay visible.
 const SESSIONS_ACTIVE_MINUTES = 24 * 60; // 24h
 const SESSIONS_LIMIT = 200;
 const FULL_SESSIONS_LIMIT = 1000;
@@ -417,11 +418,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refreshSessions = useCallback(async () => {
     if (connectionState !== 'connected') return;
     try {
-      const [res, hiddenCronSessions] = await Promise.all([
-        rpc('sessions.list', { activeMinutes: SESSIONS_ACTIVE_MINUTES, limit: SESSIONS_LIMIT }) as Promise<SessionsListResponse>,
-        fetchHiddenCronSessions(SESSIONS_ACTIVE_MINUTES, SESSIONS_LIMIT),
-      ]);
-      const newSessions = mergeSessionLists(res?.sessions || [], hiddenCronSessions);
+      const newSessions = await listAuthoritativeSessions();
       const nextCurrentSession = pickDefaultSessionKey(newSessions, currentSessionRef.current);
       
       // Smart diffing: preserve object references for unchanged sessions.
@@ -475,7 +472,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       setSessionsLoading(false);
     }
-  }, [connectionState, fetchHiddenCronSessions, mergeSessionLists, rpc]);
+  }, [connectionState, listAuthoritativeSessions]);
 
   // Update session in list from WebSocket event data
   const updateSessionFromEvent = useCallback((sessionKey: string, updates: Partial<Session>) => {
