@@ -78,6 +78,10 @@ describe('migrateTTSProvider', () => {
     expect(migrateTTSProvider('replicate')).toBe('replicate');
   });
 
+  it('should keep "mistral" as-is', () => {
+    expect(migrateTTSProvider('mistral')).toBe('mistral');
+  });
+
   it('should keep "edge" as-is', () => {
     expect(migrateTTSProvider('edge')).toBe('edge');
   });

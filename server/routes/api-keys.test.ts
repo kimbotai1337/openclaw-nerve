@@ -11,10 +11,11 @@ describe('api-keys routes', () => {
     vi.restoreAllMocks();
   });
 
-  function mockDeps(overrides: { mimoKey?: string } = {}) {
+  function mockDeps(overrides: { mistralKey?: string; mimoKey?: string } = {}) {
     const mockConfig: Record<string, unknown> = {
       openaiApiKey: '',
       replicateApiToken: '',
+      mistralApiKey: overrides.mistralKey || '',
       mimoApiKey: overrides.mimoKey || '',
     };
 
@@ -38,6 +39,17 @@ describe('api-keys routes', () => {
     return app;
   }
 
+  it('reports mistralKeySet from config', async () => {
+    mockDeps({ mistralKey: 'sk-mistral' });
+    const app = await buildApp();
+
+    const res = await app.request('/api/keys');
+    expect(res.status).toBe(200);
+
+    const json = await res.json() as Record<string, unknown>;
+    expect(json.mistralKeySet).toBe(true);
+  });
+
   it('reports xiaomiKeySet from config', async () => {
     mockDeps({ mimoKey: 'sk-mimo' });
     const app = await buildApp();
@@ -47,6 +59,23 @@ describe('api-keys routes', () => {
 
     const json = await res.json() as Record<string, unknown>;
     expect(json.xiaomiKeySet).toBe(true);
+  });
+
+  it('writes MISTRAL_API_KEY from mistralApiKey input', async () => {
+    mockDeps();
+    const app = await buildApp();
+
+    const res = await app.request('/api/keys', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mistralApiKey: 'sk-mistral' }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json() as Record<string, unknown>;
+    expect(json.ok).toBe(true);
+    expect(json.mistralKeySet).toBe(true);
   });
 
   it('writes MIMO_API_KEY from mimoApiKey input', async () => {

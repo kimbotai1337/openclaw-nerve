@@ -409,6 +409,7 @@ Applied in order in `app.ts`:
 | File | Purpose |
 |------|---------|
 | `services/openai-tts.ts` | OpenAI TTS API client (gpt-4o-mini-tts, tts-1, tts-1-hd) |
+| `services/mistral-tts.ts` | Mistral Voxtral TTS API client (`/v1/audio/speech`, base64 audio decode) |
 | `services/replicate-tts.ts` | Replicate API client for hosted TTS models (Qwen3-TTS). WAV→MP3 via ffmpeg |
 | `services/edge-tts.ts` | Microsoft Edge Read-Aloud TTS via WebSocket protocol. Free, zero-config. Includes Sec-MS-GEC token generation |
 | `services/tts-cache.ts` | LRU in-memory TTS cache with TTL expiry (100 MB budget) |

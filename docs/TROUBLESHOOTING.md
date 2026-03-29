@@ -257,6 +257,7 @@ After approval, reconnect from the browser (refresh the page or click reconnect)
 2. **TTS provider configured?** Check Settings → Audio → TTS Provider
 3. **API key present?**
    - OpenAI: requires `OPENAI_API_KEY`
+   - Mistral Voxtral: requires `MISTRAL_API_KEY`
    - Replicate: requires `REPLICATE_API_TOKEN`
    - Xiaomi MiMo: requires `MIMO_API_KEY`
    - Edge: no key needed (free)

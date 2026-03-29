@@ -162,6 +162,13 @@ export function createCommands(actions: CommandActions): Command[] {
       keywords: ['tts', 'voice', 'speech', 'openai'],
     },
     {
+      id: 'tts-mistral',
+      label: 'TTS: Switch to Mistral Voxtral',
+      action: () => actions.onTtsProviderChange('mistral' as TTSProvider),
+      category: 'voice',
+      keywords: ['tts', 'voice', 'speech', 'mistral', 'voxtral'],
+    },
+    {
       id: 'tts-replicate',
       label: 'TTS: Switch to Replicate',
       action: () => actions.onTtsProviderChange('replicate' as TTSProvider),

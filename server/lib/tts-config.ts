@@ -1,7 +1,7 @@
 /**
  * TTS voice configuration — reads/writes a JSON config file.
  *
- * All voice-related settings (OpenAI, Qwen/Replicate, Edge) live here
+ * All voice-related settings (OpenAI, Mistral, Qwen/Replicate, Edge) live here
  * instead of env vars or hardcoded values. On first run, default settings
  * are written to `<PROJECT_ROOT>/tts-config.json`. Subsequent reads merge
  * the on-disk config with defaults so new fields are always present.
@@ -46,6 +46,13 @@ export interface TTSVoiceConfig {
     /** Voice name (e.g. en-US-AriaNeural, en-GB-SoniaNeural) */
     voice: string;
   };
+  /** Mistral Voxtral TTS settings */
+  mistral: {
+    /** Mistral model name */
+    model: string;
+    /** Preset or custom Mistral voice ID */
+    voice: string;
+  };
   /** Xiaomi MiMo TTS settings */
   xiaomi: {
     /** Xiaomi model name */
@@ -73,6 +80,10 @@ const DEFAULTS: TTSVoiceConfig = {
   },
   edge: {
     voice: 'en-US-AriaNeural',
+  },
+  mistral: {
+    model: 'voxtral-mini-tts-2603',
+    voice: '82c99ee6-f932-423f-a4a3-d403c8914b8d',
   },
   xiaomi: {
     model: 'mimo-v2-tts',

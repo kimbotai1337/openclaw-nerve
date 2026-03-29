@@ -51,6 +51,7 @@ export const config = {
 
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   replicateApiToken: process.env.REPLICATE_API_TOKEN || '',
+  mistralApiKey: process.env.MISTRAL_API_KEY || '',
   mimoApiKey: process.env.MIMO_API_KEY || '',
 
   // Speech-to-text
@@ -174,10 +175,14 @@ export const WS_ALLOWED_HOSTS = new Set([
 
 /** Resolve the TTS provider label for the startup banner. */
 function ttsProviderLabel(): string {
-  if (config.openaiApiKey && config.replicateApiToken) return 'OpenAI + Replicate + Edge';
-  if (config.openaiApiKey) return 'OpenAI + Edge';
-  if (config.replicateApiToken) return 'Replicate + Edge';
-  return 'Edge (free)';
+  const providers = [
+    config.openaiApiKey ? 'OpenAI' : null,
+    config.mistralApiKey ? 'Mistral' : null,
+    config.replicateApiToken ? 'Replicate' : null,
+    'Edge',
+  ].filter(Boolean);
+
+  return providers.join(' + ') + (providers.length === 1 ? ' (free)' : '');
 }
 
 /** Resolve the STT provider label for the startup banner. */
@@ -264,6 +269,9 @@ export function validateConfig(): void {
   }
   if (!config.replicateApiToken) {
     console.warn('[config] ⚠ REPLICATE_API_TOKEN not set — Qwen TTS unavailable');
+  }
+  if (!config.mistralApiKey) {
+    console.warn('[config] ⚠ MISTRAL_API_KEY not set — Mistral Voxtral TTS unavailable');
   }
   if (!process.env.NERVE_LANGUAGE && process.env.LANGUAGE) {
     console.warn('[config] ⚠ LANGUAGE is deprecated — use NERVE_LANGUAGE instead');

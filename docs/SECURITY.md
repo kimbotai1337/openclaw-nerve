@@ -379,6 +379,7 @@ HSTS is always sent (`max-age=31536000; includeSubDomains`), even over HTTP. Bro
 | `GATEWAY_TOKEN` | `.env` file (chmod 600) | Used server-side for trusted official-gateway connections. `/api/connect-defaults` returns `token: null`. Never logged. |
 | `OPENAI_API_KEY` | `.env` file | Used server-side only. Never sent to clients. |
 | `REPLICATE_API_TOKEN` | `.env` file | Used server-side only. Never sent to clients. |
+| `MISTRAL_API_KEY` | `.env` file | Used server-side only. Never sent to clients. |
 | Gateway URL + optional manual token | `localStorage` (`oc-config`) | Used for reconnects. Trusted official-gateway flows usually keep the token empty; manually entered custom-gateway tokens persist until cleared. |
 
 The setup wizard applies `chmod 600` to `.env` and backup files, restricting read access to the file owner.

@@ -64,7 +64,7 @@ Prompts for optional API keys:
 - `OPENAI_API_KEY`, enables OpenAI TTS + Whisper transcription
 - `REPLICATE_API_TOKEN`, enables Qwen TTS via Replicate (warns if `ffmpeg` is missing)
 
-Edge TTS always works without any keys. Xiaomi MiMo can be enabled later by setting `MIMO_API_KEY` manually or saving it from Settings, Audio.
+Edge TTS always works without any keys. Mistral Voxtral and Xiaomi MiMo can be enabled later by setting `MISTRAL_API_KEY` / `MIMO_API_KEY` manually or saving them from Settings, Audio.
 
 #### 6. Advanced Settings (Optional)
 
@@ -151,11 +151,13 @@ AGENT_NAME=Friday
 |----------|-------------|
 | `OPENAI_API_KEY` | Enables OpenAI TTS (multiple voices) and Whisper audio transcription |
 | `REPLICATE_API_TOKEN` | Enables Replicate-hosted TTS models (e.g. Qwen TTS). Requires `ffmpeg` for WAV→MP3 |
+| `MISTRAL_API_KEY` | Enables Mistral Voxtral TTS when the Mistral provider is selected in Settings, Audio |
 | `MIMO_API_KEY` | Enables Xiaomi MiMo TTS when the Xiaomi provider is selected in Settings, Audio |
 
 ```bash
 OPENAI_API_KEY=sk-...
 REPLICATE_API_TOKEN=r8_...
+MISTRAL_API_KEY=sk-mistral-...
 MIMO_API_KEY=sk-mimo-...
 ```
 
@@ -163,6 +165,8 @@ TTS provider fallback chain (when no explicit provider is requested):
 1. **OpenAI** — if `OPENAI_API_KEY` is set
 2. **Replicate** — if `REPLICATE_API_TOKEN` is set
 3. **Edge TTS** — always available, no API key needed (default for new installs)
+
+Mistral Voxtral is available as an explicit provider option when `MISTRAL_API_KEY` is set. It is not part of the automatic fallback chain.
 
 Xiaomi MiMo is available as an explicit provider option when `MIMO_API_KEY` is set. It is not part of the automatic fallback chain.
 
@@ -434,6 +438,7 @@ NERVE_SESSION_TTL=2592000000
 # API Keys
 OPENAI_API_KEY=sk-...
 REPLICATE_API_TOKEN=r8_...
+MISTRAL_API_KEY=sk-mistral-...
 MIMO_API_KEY=sk-mimo-...
 
 # Speech / Language

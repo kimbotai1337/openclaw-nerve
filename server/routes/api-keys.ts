@@ -18,6 +18,7 @@ app.get('/api/keys', rateLimitGeneral, (c) => {
   return c.json({
     openaiKeySet: !!config.openaiApiKey,
     replicateKeySet: !!config.replicateApiToken,
+    mistralKeySet: !!config.mistralApiKey,
     xiaomiKeySet: !!config.mimoApiKey,
   });
 });
@@ -43,6 +44,13 @@ app.put('/api/keys', rateLimitGeneral, async (c) => {
       results.push(val ? 'REPLICATE_API_TOKEN saved' : 'REPLICATE_API_TOKEN cleared');
     }
 
+    if (body.mistralApiKey !== undefined) {
+      const val = body.mistralApiKey.trim();
+      await writeEnvKey('MISTRAL_API_KEY', val);
+      (config as Record<string, unknown>).mistralApiKey = val;
+      results.push(val ? 'MISTRAL_API_KEY saved' : 'MISTRAL_API_KEY cleared');
+    }
+
     if (body.mimoApiKey !== undefined) {
       const val = body.mimoApiKey.trim();
       await writeEnvKey('MIMO_API_KEY', val);
@@ -55,6 +63,7 @@ app.put('/api/keys', rateLimitGeneral, async (c) => {
       message: results.join(', ') || 'No changes',
       openaiKeySet: !!config.openaiApiKey,
       replicateKeySet: !!config.replicateApiToken,
+      mistralKeySet: !!config.mistralApiKey,
       xiaomiKeySet: !!config.mimoApiKey,
     });
   } catch {

@@ -13,10 +13,12 @@ describe('TTS routes', () => {
 
   function mockDeps(overrides: {
     openaiKey?: string;
+    mistralKey?: string;
     replicateToken?: string;
     mimoKey?: string;
     edgeResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
     openaiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
+    mistralResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
     replicateResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
     xiaomiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
   } = {}) {
@@ -24,6 +26,7 @@ describe('TTS routes', () => {
       config: {
         auth: false, port: 3000, host: '127.0.0.1', sslPort: 3443,
         openaiApiKey: overrides.openaiKey || '',
+        mistralApiKey: overrides.mistralKey || '',
         replicateApiToken: overrides.replicateToken || '',
         mimoApiKey: overrides.mimoKey || '',
       },
@@ -52,6 +55,11 @@ describe('TTS routes', () => {
         overrides.replicateResult || { ok: true, buf: Buffer.from('fake-replicate-audio') }
       ),
     }));
+    vi.doMock('../services/mistral-tts.js', () => ({
+      synthesizeMistral: vi.fn(async () =>
+        overrides.mistralResult || { ok: true, buf: Buffer.from('fake-mistral-audio'), contentType: 'audio/mpeg' }
+      ),
+    }));
     vi.doMock('../services/xiaomi-tts.js', () => ({
       synthesizeXiaomi: vi.fn(async () =>
         overrides.xiaomiResult || { ok: true, buf: Buffer.from('RIFFdemo'), contentType: 'audio/wav' }
@@ -62,6 +70,7 @@ describe('TTS routes', () => {
         openai: { voice: 'alloy', model: 'tts-1', instructions: '' },
         edge: { voice: 'en-US-JennyNeural' },
         qwen: {},
+        mistral: { model: 'voxtral-mini-tts-2603', voice: '' },
         xiaomi: { model: 'mimo-v2-tts', voice: 'mimo_default', style: 'Happy' },
       })),
       updateTTSConfig: vi.fn((patch: unknown) => patch),
@@ -121,6 +130,18 @@ describe('TTS routes', () => {
       expect(res.status).toBe(200);
     });
 
+    it('uses explicit mistral provider when requested', async () => {
+      mockDeps({ mistralKey: 'sk-mistral' });
+      const app = await buildApp();
+      const res = await app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', provider: 'mistral' }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
+    });
+
     it('uses explicit edge provider even when OpenAI key exists', async () => {
       mockDeps({ openaiKey: 'sk-test' });
       const app = await buildApp();
@@ -154,6 +175,17 @@ describe('TTS routes', () => {
       });
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('audio/wav');
+    });
+
+    it('returns Mistral provider errors', async () => {
+      mockDeps({ mistralResult: { ok: false, message: 'Mistral failed', status: 502 } });
+      const app = await buildApp();
+      const res = await app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', provider: 'mistral' }),
+      });
+      expect(res.status).toBe(502);
     });
 
     it('returns Xiaomi provider errors', async () => {
@@ -221,6 +253,17 @@ describe('TTS routes', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ edge: { voice: 'en-US-GuyNeural' } }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it('accepts valid Mistral config patch', async () => {
+      mockDeps();
+      const app = await buildApp();
+      const res = await app.request('/api/tts/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mistral: { model: 'voxtral-tts-26-03', voice: 'alloy_voice' } }),
       });
       expect(res.status).toBe(200);
     });

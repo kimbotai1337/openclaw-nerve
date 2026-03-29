@@ -57,7 +57,7 @@ async function loadTtsModule(opts: {
 }
 
 describe('getTTSConfig', () => {
-  it('returns Xiaomi defaults when config file is missing', async () => {
+  it('returns Mistral and Xiaomi defaults when config file is missing', async () => {
     const mod = await loadTtsModule({
       language: 'en',
       edgeVoiceGender: 'female',
@@ -65,19 +65,23 @@ describe('getTTSConfig', () => {
     });
 
     const cfg = mod.getTTSConfig();
+    expect(cfg.mistral.model).toBe('voxtral-mini-tts-2603');
+    expect(cfg.mistral.voice).toBe('82c99ee6-f932-423f-a4a3-d403c8914b8d');
     expect(cfg.xiaomi.model).toBe('mimo-v2-tts');
     expect(cfg.xiaomi.voice).toBe('mimo_default');
     expect(cfg.xiaomi.style).toBe('');
   });
 
-  it('deep-merges Xiaomi patches without dropping defaults', async () => {
+  it('deep-merges Mistral and Xiaomi patches without dropping defaults', async () => {
     const mod = await loadTtsModule({
       language: 'en',
       edgeVoiceGender: 'female',
       storedVoice: 'en-US-JennyNeural',
     });
 
-    const cfg = mod.updateTTSConfig({ xiaomi: { style: 'Happy' } });
+    const cfg = mod.updateTTSConfig({ mistral: { voice: 'alloy_voice' }, xiaomi: { style: 'Happy' } });
+    expect(cfg.mistral.model).toBe('voxtral-mini-tts-2603');
+    expect(cfg.mistral.voice).toBe('alloy_voice');
     expect(cfg.xiaomi.style).toBe('Happy');
     expect(cfg.xiaomi.model).toBe('mimo-v2-tts');
     expect(cfg.xiaomi.voice).toBe('mimo_default');

@@ -9,12 +9,14 @@
 
 export const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 export const REPLICATE_BASE_URL = process.env.REPLICATE_BASE_URL || 'https://api.replicate.com/v1';
+export const MISTRAL_BASE_URL = process.env.MISTRAL_BASE_URL || 'https://api.mistral.ai/v1';
 
 // ─── API endpoints (derived from base URLs) ──────────────────────────────────
 
 export const OPENAI_TTS_URL = `${OPENAI_BASE_URL}/audio/speech`;
 export const OPENAI_WHISPER_URL = `${OPENAI_BASE_URL}/audio/transcriptions`;
 export const REPLICATE_QWEN_TTS_URL = `${REPLICATE_BASE_URL}/models/qwen/qwen3-tts/predictions`;
+export const MISTRAL_TTS_URL = `${MISTRAL_BASE_URL}/audio/speech`;
 
 // ─── Default connection ──────────────────────────────────────────────────────
 

@@ -352,7 +352,7 @@ function ApiKeyInput({
 }: {
   keyName: string;
   provider: string;
-  fieldName: 'openaiKey' | 'replicateToken' | 'mimoApiKey';
+  fieldName: 'openaiKey' | 'mistralApiKey' | 'replicateToken' | 'mimoApiKey';
   onSaved: () => void;
 }) {
   const [value, setValue] = useState('');
@@ -419,6 +419,10 @@ const PROVIDER_MODELS: Record<TTSProvider, { value: string; label: string }[]> =
     { value: 'tts-1', label: 'tts-1' },
     { value: 'tts-1-hd', label: 'tts-1-hd' },
   ],
+  mistral: [
+    { value: '', label: 'voxtral-mini-tts-2603 (default)' },
+    { value: 'voxtral-tts-26-03', label: 'voxtral-tts-26-03' },
+  ],
   replicate: [
     { value: '', label: 'qwen-tts (default)' },
   ],
@@ -465,13 +469,19 @@ export function AudioSettings({
   const { state: langState, support, isMultilingual, setLanguage } = useLanguage();
 
   // Fetch API key status once on mount
-  const [apiKeys, setApiKeys] = useState<{ openai: boolean; replicate: boolean; xiaomi: boolean }>({ openai: true, replicate: true, xiaomi: true });
+  const [apiKeys, setApiKeys] = useState<{ openai: boolean; mistral: boolean; replicate: boolean; xiaomi: boolean }>({
+    openai: true,
+    mistral: true,
+    replicate: true,
+    xiaomi: true,
+  });
   useEffect(() => {
     fetch('/api/keys')
       .then((r) => r.json())
       .then((data) => {
         setApiKeys({
           openai: !!data.openaiKeySet,
+          mistral: !!data.mistralKeySet,
           replicate: !!data.replicateKeySet,
           xiaomi: !!data.xiaomiKeySet,
         });
@@ -723,7 +733,7 @@ export function AudioSettings({
       {showOutput && (
         <div className="space-y-2">
           <span className="cockpit-field-label">TTS Provider</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => onTtsProviderChange('openai')}
@@ -731,6 +741,14 @@ export function AudioSettings({
               className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
             >
               OpenAI
+            </button>
+            <button
+              type="button"
+              onClick={() => onTtsProviderChange('mistral')}
+              data-active={ttsProvider === 'mistral'}
+              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+            >
+              Mistral Voxtral
             </button>
             <button
               type="button"
@@ -777,6 +795,9 @@ export function AudioSettings({
       {showOutput && ttsProvider === 'openai' && !apiKeys.openai && (
         <ApiKeyInput keyName="OPENAI_API_KEY" provider="OpenAI TTS" fieldName="openaiKey" onSaved={() => setApiKeys(k => ({ ...k, openai: true }))} />
       )}
+      {showOutput && ttsProvider === 'mistral' && !apiKeys.mistral && (
+        <ApiKeyInput keyName="MISTRAL_API_KEY" provider="Mistral Voxtral" fieldName="mistralApiKey" onSaved={() => setApiKeys(k => ({ ...k, mistral: true }))} />
+      )}
       {showOutput && ttsProvider === 'replicate' && !apiKeys.replicate && (
         <ApiKeyInput keyName="REPLICATE_API_TOKEN" provider="Replicate TTS" fieldName="replicateToken" onSaved={() => setApiKeys(k => ({ ...k, replicate: true }))} />
       )}
@@ -792,10 +813,15 @@ export function AudioSettings({
             <p className="mt-1 text-xs text-muted-foreground">Select the synthesis model exposed by the active provider.</p>
           </div>
           <InlineSelect
-            value={ttsProvider === 'xiaomi' ? (ttsModel || config?.xiaomi.model || '') : ttsModel}
+            value={ttsProvider === 'xiaomi'
+              ? (ttsModel || config?.xiaomi.model || '')
+              : ttsProvider === 'mistral'
+                ? (ttsModel || (config?.mistral.model === 'voxtral-mini-tts-2603' ? '' : config?.mistral.model || ''))
+                : ttsModel}
             onChange={(value) => {
               onTtsModelChange(value);
               if (ttsProvider === 'xiaomi') updateField('xiaomi', 'model', value);
+              if (ttsProvider === 'mistral') updateField('mistral', 'model', value || 'voxtral-mini-tts-2603');
             }}
             options={models}
             ariaLabel="TTS Model"
@@ -837,6 +863,23 @@ export function AudioSettings({
                 placeholder="Describe how the voice should sound..."
               />
             </>
+          )}
+
+          {ttsProvider === 'mistral' && (
+            <div className="cockpit-row items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-foreground">Voice ID</span>
+                <p className="mt-1 text-xs text-muted-foreground">Optional preset or custom Mistral voice ID. Leave blank to use the provider default.</p>
+              </div>
+              <input
+                type="text"
+                value={config.mistral.voice}
+                onChange={(e) => updateField('mistral', 'voice', e.target.value)}
+                placeholder="alloy_voice"
+                className="cockpit-input cockpit-input-mono h-11 min-w-[188px]"
+                aria-label="Mistral Voice ID"
+              />
+            </div>
           )}
 
           {ttsProvider === 'edge' && (

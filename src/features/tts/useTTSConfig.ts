@@ -16,6 +16,10 @@ export interface TTSVoiceConfig {
   edge: {
     voice: string;
   };
+  mistral: {
+    model: string;
+    voice: string;
+  };
   xiaomi: {
     model: string;
     voice: string;

@@ -1,13 +1,14 @@
 /**
  * POST /api/tts — Text-to-speech synthesis.
  *
- * Supports OpenAI TTS, Replicate (Qwen, etc.), and Edge TTS (free, zero-config).
+ * Supports OpenAI TTS, Mistral Voxtral, Replicate (Qwen, etc.), and Edge TTS (free, zero-config).
  * Body: { text: string, provider?: string, model?: string, voice?: string }
  * Response: audio/mpeg binary
  *
  * Provider selection priority:
  *  - Explicit provider choice is always honoured
  *  - "openai" → OpenAI TTS (requires OPENAI_API_KEY)
+ *  - "mistral" → Mistral Voxtral TTS (requires MISTRAL_API_KEY)
  *  - "replicate" → Replicate-hosted models (requires REPLICATE_API_TOKEN)
  *  - "edge" → Microsoft Edge Read-Aloud TTS (free, no key needed)
  *  - Auto fallback: openai (if key) → replicate (if key) → edge (always available)
@@ -25,6 +26,7 @@ import { getTtsCache, setTtsCache } from '../services/tts-cache.js';
 import { synthesizeOpenAI } from '../services/openai-tts.js';
 import { synthesizeReplicate } from '../services/replicate-tts.js';
 import { synthesizeEdge } from '../services/edge-tts.js';
+import { synthesizeMistral } from '../services/mistral-tts.js';
 import { synthesizeXiaomi } from '../services/xiaomi-tts.js';
 import { rateLimitTTS, rateLimitGeneral } from '../middleware/rate-limit.js';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
@@ -41,7 +43,7 @@ const ttsSchema = z.object({
     .refine((s) => s.trim().length > 0, 'Text cannot be empty or whitespace'),
   voice: z.string().optional(),
   // Accept both old ("qwen") and new ("replicate") values
-  provider: z.enum(['openai', 'replicate', 'qwen', 'edge', 'xiaomi']).optional(),
+  provider: z.enum(['openai', 'mistral', 'replicate', 'qwen', 'edge', 'xiaomi']).optional(),
   model: z.string().optional(),
 });
 
@@ -74,6 +76,7 @@ app.post(
 
       // Resolve effective provider: explicit > openai (if key) > replicate (if key) > edge
       const useXiaomi = provider === 'xiaomi';
+      const useMistral = provider === 'mistral';
       const useReplicate =
         provider === 'replicate' ||
         (!provider && !config.openaiApiKey && !!config.replicateApiToken);
@@ -82,11 +85,13 @@ app.post(
         (!provider && !config.openaiApiKey && !config.replicateApiToken);
       const effectiveProvider = useXiaomi
         ? 'xiaomi'
-        : useEdge
-          ? 'edge'
-          : useReplicate
-            ? 'replicate'
-            : 'openai';
+        : useMistral
+          ? 'mistral'
+          : useEdge
+            ? 'edge'
+            : useReplicate
+              ? 'replicate'
+              : 'openai';
       console.log(`[tts] provider=${effectiveProvider} voice=${voice} text="${text.slice(0, 50)}..."`);
 
       const xiaomiStyle = effectiveProvider === 'xiaomi' ? getTTSConfig().xiaomi.style : '';
@@ -107,6 +112,8 @@ app.post(
       let result;
       if (effectiveProvider === 'xiaomi') {
         result = await synthesizeXiaomi(text, { model, voice });
+      } else if (effectiveProvider === 'mistral') {
+        result = await synthesizeMistral(text, { model, voice });
       } else if (effectiveProvider === 'edge') {
         result = await synthesizeEdge(text, voice);
       } else if (effectiveProvider === 'replicate') {
@@ -143,6 +150,7 @@ const TTS_CONFIG_SCHEMA: Record<string, string[]> = {
   qwen: ['mode', 'language', 'speaker', 'voiceDescription', 'styleInstruction'],
   openai: ['model', 'voice', 'instructions'],
   edge: ['voice'],
+  mistral: ['model', 'voice'],
   xiaomi: ['model', 'voice', 'style'],
 };
 

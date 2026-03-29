@@ -289,7 +289,7 @@ Synthesizes speech from text. Returns raw audio binary.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `text` | `string` | Yes | Text to synthesize (1–5000 chars, non-empty after trim) |
-| `provider` | `"openai" \| "replicate" \| "edge" \| "qwen" \| "xiaomi"` | No | TTS provider. `"qwen"` is a legacy alias for `"replicate"` + model `"qwen-tts"` |
+| `provider` | `"openai" \| "mistral" \| "replicate" \| "edge" \| "qwen" \| "xiaomi"` | No | TTS provider. `"qwen"` is a legacy alias for `"replicate"` + model `"qwen-tts"` |
 | `voice` | `string` | No | Provider-specific voice name |
 | `model` | `string` | No | Provider-specific model ID |
 
@@ -299,9 +299,11 @@ Synthesizes speech from text. Returns raw audio binary.
 2. Replicate, if `REPLICATE_API_TOKEN` is set
 3. Edge TTS, always available (free, no API key)
 
+Mistral Voxtral is available when `provider: "mistral"` is requested and `MISTRAL_API_KEY` is configured. It is not part of the automatic fallback chain.
+
 Xiaomi MiMo is available when `provider: "xiaomi"` is requested and `MIMO_API_KEY` is configured. It is not part of the automatic fallback chain.
 
-**Response:** `audio/mpeg` binary for OpenAI, Replicate, and Edge, or `audio/wav` for Xiaomi MiMo (200)
+**Response:** `audio/mpeg` binary for OpenAI, Mistral, Replicate, and Edge, or `audio/wav` for Xiaomi MiMo (200)
 
 **Errors:**
 
@@ -334,6 +336,7 @@ Returns the current TTS voice configuration.
     "instructions": "Speak naturally and conversationally, like a real person. Warm, friendly tone with a slight British accent. Keep it casual and relaxed, not robotic or overly formal."
   },
   "edge": { "voice": "en-US-AriaNeural" },
+  "mistral": { "model": "voxtral-mini-tts-2603", "voice": "" },
   "xiaomi": { "model": "mimo-v2-tts", "voice": "mimo_default", "style": "" }
 }
 ```
@@ -348,6 +351,7 @@ Partially updates the TTS voice configuration. Only known keys are accepted.
 {
   "openai": { "voice": "nova", "instructions": "Speak cheerfully" },
   "edge": { "voice": "en-GB-SoniaNeural" },
+  "mistral": { "model": "voxtral-tts-26-03", "voice": "alloy_voice" },
   "xiaomi": { "voice": "default_en", "style": "Happy" }
 }
 ```
@@ -359,6 +363,7 @@ Partially updates the TTS voice configuration. Only known keys are accepted.
 | `qwen` | `mode`, `language`, `speaker`, `voiceDescription`, `styleInstruction` |
 | `openai` | `model`, `voice`, `instructions` |
 | `edge` | `voice` |
+| `mistral` | `model`, `voice` |
 | `xiaomi` | `model`, `voice`, `style` |
 
 All values must be strings, max 2000 characters each.
@@ -373,6 +378,7 @@ Returns whether optional provider keys are configured. Key values are never retu
 {
   "openaiKeySet": true,
   "replicateKeySet": false,
+  "mistralKeySet": true,
   "xiaomiKeySet": true
 }
 ```
@@ -387,6 +393,7 @@ Writes optional provider keys to `.env` and hot-reloads the in-memory config.
 {
   "openaiKey": "sk-...",
   "replicateToken": "r8_...",
+  "mistralApiKey": "sk-mistral-...",
   "mimoApiKey": "sk-mimo-..."
 }
 ```
@@ -398,9 +405,10 @@ Any subset of fields may be provided. Sending an empty string clears that key.
 ```json
 {
   "ok": true,
-  "message": "OPENAI_API_KEY saved, MIMO_API_KEY saved",
+  "message": "OPENAI_API_KEY saved, MISTRAL_API_KEY saved, MIMO_API_KEY saved",
   "openaiKeySet": true,
   "replicateKeySet": false,
+  "mistralKeySet": true,
   "xiaomiKeySet": true
 }
 ```

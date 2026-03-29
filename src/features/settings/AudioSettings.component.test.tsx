@@ -17,6 +17,7 @@ vi.mock('@/features/tts/useTTSConfig', () => ({
       edge: { voice: 'en-US-AriaNeural' },
       openai: { model: 'tts-1', voice: 'alloy', instructions: '' },
       qwen: { mode: 'voice_design', language: 'English', speaker: 'Serena', voiceDescription: '', styleInstruction: '' },
+      mistral: { model: 'voxtral-mini-tts-2603', voice: '' },
       xiaomi: { model: 'mimo-v2-tts', voice: 'mimo_default', style: '' },
     },
     saved: true,
@@ -72,9 +73,10 @@ function mockWakeWordSupport(result: { supported: boolean; reason: 'mobile-web' 
   (wakeWordSupport.isWakeWordSupportedEnvironment as Mock).mockReturnValue(result.supported);
 }
 
-type ApiKeyState = { openaiKeySet: boolean; replicateKeySet: boolean; xiaomiKeySet: boolean; hasGpu: boolean };
+type ApiKeyState = { openaiKeySet: boolean; mistralKeySet: boolean; replicateKeySet: boolean; xiaomiKeySet: boolean; hasGpu: boolean };
 let apiKeyState: ApiKeyState = {
   openaiKeySet: true,
+  mistralKeySet: false,
   replicateKeySet: true,
   xiaomiKeySet: false,
   hasGpu: false,
@@ -86,6 +88,7 @@ describe('AudioSettings', () => {
     mockWakeWordSupport({ supported: true, reason: null });
     apiKeyState = {
       openaiKeySet: true,
+      mistralKeySet: false,
       replicateKeySet: true,
       xiaomiKeySet: false,
       hasGpu: false,
@@ -169,6 +172,36 @@ describe('AudioSettings', () => {
 
       expect(await screen.findByText(/wake word isn't supported on mobile web/i)).toBeInTheDocument();
       expect(screen.getByText(/use the manual mic trigger instead/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('Mistral Voxtral output settings', () => {
+    it('renders a Mistral Voxtral provider button', async () => {
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="mistral" ttsModel="" />);
+      expect(await screen.findByRole('button', { name: 'Mistral Voxtral' })).toBeInTheDocument();
+    });
+
+    it('shows the Mistral API key prompt when selected and the key is missing', async () => {
+      apiKeyState.mistralKeySet = false;
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="mistral" ttsModel="" />);
+
+      expect(await screen.findByText(/MISTRAL_API_KEY required for Mistral Voxtral/i)).toBeInTheDocument();
+    });
+
+    it('renders Mistral model and voice controls', async () => {
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="mistral" ttsModel="" />);
+
+      expect(await screen.findByLabelText('TTS Model')).toHaveValue('');
+      expect(screen.getByLabelText('Mistral Voice ID')).toHaveValue('');
+      expect(screen.getByRole('option', { name: 'voxtral-mini-tts-2603 (default)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'voxtral-tts-26-03' })).toBeInTheDocument();
+    });
+
+    it('updates Mistral voice ID when the field changes', async () => {
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="mistral" ttsModel="voxtral-mini-tts-2603" />);
+
+      fireEvent.change(await screen.findByLabelText('Mistral Voice ID'), { target: { value: 'alloy_voice' } });
+      expect(updateField).toHaveBeenCalledWith('mistral', 'voice', 'alloy_voice');
     });
   });
 
