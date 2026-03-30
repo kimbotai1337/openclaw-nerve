@@ -2409,6 +2409,17 @@ describe('POST /api/kanban/tasks/:id/complete — run key integrity', () => {
     expect(completed?.status).toBe('review');
     expect(completed?.run?.childSessionKey).toBe(childSessionKey);
     expect(completed?.result).toContain('Exact child done');
+
+    const parentReportCall = (gatewayRpcMock as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([method, params]) => method === 'sessions.send' && params?.key === 'agent:reviewer:main'
+    );
+    expect(parentReportCall).toBeDefined();
+    expect(parentReportCall?.[1]).toMatchObject({
+      key: 'agent:reviewer:main',
+    });
+    expect(String((parentReportCall?.[1] as Record<string, unknown>).message ?? '')).toContain('Exact child task');
+    expect(String((parentReportCall?.[1] as Record<string, unknown>).message ?? '')).toContain(childSessionKey);
+    expect(String((parentReportCall?.[1] as Record<string, unknown>).message ?? '')).toContain('Exact child done');
   });
 
   it('polls the spawned child session via gateway RPC and completes when session reports done status', async () => {
@@ -2550,6 +2561,14 @@ describe('POST /api/kanban/tasks/:id/complete — run key integrity', () => {
     expect(failed?.run?.sessionKey).toBe(runKey);
     expect(failed?.run?.childSessionKey).toBe(childSessionKey);
     expect(failed?.run?.error).toBe('Worker crashed');
+
+    const parentReportCall = (gatewayRpcMock as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([method, params]) => method === 'sessions.send' && params?.key === 'agent:reviewer:main'
+    );
+    expect(parentReportCall).toBeDefined();
+    expect(String((parentReportCall?.[1] as Record<string, unknown>).message ?? '')).toContain('Failed task');
+    expect(String((parentReportCall?.[1] as Record<string, unknown>).message ?? '')).toContain(childSessionKey);
+    expect(String((parentReportCall?.[1] as Record<string, unknown>).message ?? '')).toContain('Worker crashed');
   });
 
   it('ignores late stale poller completion from run 1 after run 2 is active', async () => {

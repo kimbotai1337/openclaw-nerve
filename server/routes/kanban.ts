@@ -221,6 +221,76 @@ function pickSpawnedChildSession(
   return unseenChildren.length === 1 ? unseenChildren[0] : null;
 }
 
+function getLastAssistantText(
+  messages: Array<Record<string, unknown>>,
+  fallback = 'Completed (no result text)',
+): string {
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+  if (!lastAssistant) return fallback;
+
+  const content = lastAssistant.content;
+  if (typeof content === 'string' && content.trim()) return content;
+  if (Array.isArray(content)) {
+    const textPart = (content as Array<Record<string, unknown>>).find((p) => p.type === 'text');
+    if (textPart && typeof textPart.text === 'string' && textPart.text.trim()) return textPart.text;
+  }
+  return fallback;
+}
+
+function trimKanbanParentReportText(text: string, maxChars = 4_000): string {
+  const normalized = text.trim();
+  if (!normalized) return 'Completed (no result text)';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 13).trimEnd()}\n\n[truncated]`;
+}
+
+function buildKanbanParentCompletionMessage(params: {
+  task: KanbanTask;
+  parentSessionKey: string;
+  childSessionKey: string;
+  outcome: 'completed' | 'failed';
+  result?: string;
+  error?: string;
+}): string {
+  const lines = [
+    'Kanban child session completion report.',
+    '',
+    'Use this as context from work that ran under this root. This is a completion update, not a fresh task unless follow-up is needed.',
+    '',
+    `Task ID: ${params.task.id}`,
+    `Title: ${params.task.title}`,
+    `Parent root: ${params.parentSessionKey}`,
+    `Child session: ${params.childSessionKey}`,
+    `Outcome: ${params.outcome}`,
+  ];
+
+  if (params.outcome === 'completed') {
+    lines.push('', 'Result:', trimKanbanParentReportText(params.result ?? 'Completed (no result text)'));
+  } else {
+    lines.push('', 'Error:', trimKanbanParentReportText(params.error ?? 'Child session failed'));
+  }
+
+  return lines.join('\n');
+}
+
+async function reportKanbanChildCompletionToParent(params: {
+  task: KanbanTask;
+  parentSessionKey: string;
+  childSessionKey: string;
+  outcome: 'completed' | 'failed';
+  result?: string;
+  error?: string;
+}): Promise<void> {
+  const message = buildKanbanParentCompletionMessage(params);
+  const suffix = params.outcome === 'completed' ? 'done' : 'failed';
+
+  await gatewayRpcCall('sessions.send', {
+    key: params.parentSessionKey,
+    message,
+    idempotencyKey: `kanban-parent-report:${params.task.id}:${params.childSessionKey}:${suffix}`,
+  });
+}
+
 /** Poll gateway subagents for a kanban run until it finishes, then complete the run. */
 function pollSessionCompletion(
   store: ReturnType<typeof getKanbanStore>,
@@ -283,16 +353,7 @@ function pollSessionCompletion(
             });
             const histParsed = parseGatewayResponse(histRaw);
             const messages = (histParsed.messages ?? []) as Array<Record<string, unknown>>;
-            const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-            if (lastAssistant) {
-              const content = lastAssistant.content;
-              if (typeof content === 'string') {
-                resultText = content;
-              } else if (Array.isArray(content)) {
-                const textPart = (content as Array<Record<string, unknown>>).find((p) => p.type === 'text');
-                if (textPart && typeof textPart.text === 'string') resultText = textPart.text;
-              }
-            }
+            resultText = getLastAssistantText(messages, resultText);
           } catch (err) {
             console.warn(`[kanban] Could not fetch history for ${identity.correlationKey}:`, err);
           }
@@ -406,7 +467,20 @@ function pollFallbackSessionCompletion(
       const status = session.status;
       if (status === 'error' || status === 'failed') {
         const errorMsg = session.error || 'Session failed';
-        await store.completeRun(taskId, identity.correlationKey, undefined, errorMsg).catch(() => {});
+        const failedTask = await store.completeRun(taskId, identity.correlationKey, undefined, errorMsg).catch(() => null);
+        if (failedTask) {
+          try {
+            await reportKanbanChildCompletionToParent({
+              task: failedTask,
+              parentSessionKey: identity.parentSessionKey,
+              childSessionKey: activeSessionKey,
+              outcome: 'failed',
+              error: errorMsg,
+            });
+          } catch (err) {
+            console.warn(`[kanban] Failed to report child failure back to ${identity.parentSessionKey}:`, err);
+          }
+        }
         return;
       }
 
@@ -424,16 +498,7 @@ function pollFallbackSessionCompletion(
             includeTools: true,
           }) as { messages?: Array<Record<string, unknown>> };
           const messages = Array.isArray(histResponse.messages) ? histResponse.messages : [];
-          const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-          if (lastAssistant) {
-            const content = lastAssistant.content;
-            if (typeof content === 'string') {
-              resultText = content;
-            } else if (Array.isArray(content)) {
-              const textPart = (content as Array<Record<string, unknown>>).find((p) => p.type === 'text');
-              if (textPart && typeof textPart.text === 'string') resultText = textPart.text;
-            }
-          }
+          resultText = getLastAssistantText(messages, resultText);
         } catch (err) {
           console.warn(`[kanban] Could not fetch history for ${activeSessionKey}:`, err);
         }
@@ -460,6 +525,18 @@ function pollFallbackSessionCompletion(
           } catch (err) {
             console.warn(`[kanban] Failed to create proposal from marker:`, err);
           }
+        }
+
+        try {
+          await reportKanbanChildCompletionToParent({
+            task: completedTask,
+            parentSessionKey: identity.parentSessionKey,
+            childSessionKey: activeSessionKey,
+            outcome: 'completed',
+            result: cleanResult,
+          });
+        } catch (err) {
+          console.warn(`[kanban] Failed to report child completion back to ${identity.parentSessionKey}:`, err);
         }
         return;
       }
