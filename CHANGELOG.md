@@ -21,7 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Installer support for `--gateway-url` so Nerve can target a remote gateway from first boot (PR #181)
 - AI agent setup docs and a raw install contract for agent-driven installs (PR #182)
-- Kanban task lookup by id and support for custom board column keys via board config (PR #176, PR #173)
+- A dedicated `GET /api/kanban/tasks/:id` endpoint for direct Kanban task lookup by id (PR #176)
+- An assignee picker for Kanban task forms so users no longer need to enter raw assignee values manually (PR #203)
+- Support for custom board column keys via board config (PR #173)
 - Shebang-based syntax highlighting for extensionless executable files (PR #190)
 
 ### Changed
