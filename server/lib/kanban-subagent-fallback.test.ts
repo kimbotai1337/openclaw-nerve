@@ -19,16 +19,17 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
     vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method, params) => {
       calls.push({ method, params });
 
-      if (method === 'sessions.list') {
+      if (method === 'sessions.create') {
         return {
-          sessions: [
-            { sessionKey: 'agent:main:main' },
-            { sessionKey: 'agent:reviewer:main' },
-            { sessionKey: 'agent:reviewer:subagent:existing-child' },
-          ],
+          ok: true,
+          key: String(params.key),
+          entry: {
+            label: params.label,
+            parentSessionKey: params.parentSessionKey,
+          },
         };
       }
-      if (method === 'chat.send') {
+      if (method === 'sessions.send') {
         return { ok: true, runId: 'mock-run-id-12345' };
       }
       return {};
@@ -39,7 +40,7 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls sessions.list before chat.send', async () => {
+  it('creates a real child session before sending the task', async () => {
     await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
@@ -47,29 +48,25 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
     });
 
     expect(calls.length).toBeGreaterThanOrEqual(2);
-    expect(calls[0].method).toBe('sessions.list');
-    expect(calls[1].method).toBe('chat.send');
+    expect(calls[0].method).toBe('sessions.create');
+    expect(calls[1].method).toBe('sessions.send');
   });
 
-  it('uses a 1-week lookup window and full session inventory when validating parent root existence', async () => {
-    await launchKanbanFallbackSubagentViaRpc({
+  it('fails when the parent session is not a top-level root', async () => {
+    await expect(launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
-      parentSessionKey: 'agent:reviewer:main',
-    });
+      parentSessionKey: 'agent:reviewer:subagent:existing-child',
+    })).rejects.toThrow('Parent agent session must be a top-level root');
 
-    expect(calls[0].params.activeMinutes).toBe(7 * 24 * 60);
-    expect(calls[0].params.limit).toBe(1000);
+    expect(calls).toHaveLength(0);
   });
 
-  it('aborts before chat.send when parent root session is missing', async () => {
+  it('surfaces sessions.create failures from the gateway', async () => {
     vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method, params) => {
       calls.push({ method, params });
-      if (method === 'sessions.list') {
-        return { sessions: [{ sessionKey: 'agent:main:main' }] };
-      }
-      if (method === 'chat.send') {
-        return { ok: true, runId: 'should-not-happen' };
+      if (method === 'sessions.create') {
+        throw new Error('Parent session not found: agent:reviewer:main');
       }
       return {};
     });
@@ -78,25 +75,25 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
       label: 'test-kanban-run',
       task: 'Execute kanban task',
       parentSessionKey: 'agent:reviewer:main',
-    })).rejects.toThrow('Parent agent session not found');
+    })).rejects.toThrow('Parent session not found');
 
-    expect(calls.some((call) => call.method === 'sessions.list')).toBe(true);
-    expect(calls.some((call) => call.method === 'chat.send')).toBe(false);
+    expect(calls.some((call) => call.method === 'sessions.send')).toBe(false);
   });
 
-  it('sends the spawn request to the parent root session', async () => {
+  it('creates the worker session under the requested parent root', async () => {
     await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
       parentSessionKey: 'agent:reviewer:main',
     });
 
-    const chatSendCall = calls.find(c => c.method === 'chat.send');
-    expect(chatSendCall?.params.sessionKey).toBe('agent:reviewer:main');
-    expect(chatSendCall?.params.deliver).toBeUndefined();
+    const createCall = calls.find((c) => c.method === 'sessions.create');
+    expect(createCall?.params.parentSessionKey).toBe('agent:reviewer:main');
+    expect(createCall?.params.label).toBe('test-kanban-run');
+    expect(createCall?.params.key).toMatch(/^agent:reviewer:subagent:/);
   });
 
-  it('encodes a spawn-subagent message with label, model, and thinking', async () => {
+  it('sends the raw task to the created child session with model/thinking preserved', async () => {
     await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
@@ -105,21 +102,17 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
       thinking: 'high',
     });
 
-    const chatSendCall = calls.find(c => c.method === 'chat.send');
-    expect(chatSendCall?.params.message).toBe(
-      [
-        '[spawn-subagent]',
-        'task: Execute kanban task',
-        'label: test-kanban-run',
-        'model: openai-codex/gpt-5.4',
-        'thinking: high',
-        'mode: run',
-        'cleanup: keep',
-      ].join('\n'),
-    );
+    const createCall = calls.find((c) => c.method === 'sessions.create');
+    const sendCall = calls.find((c) => c.method === 'sessions.send');
+
+    expect(createCall?.params.model).toBe('openai-codex/gpt-5.4');
+    expect(sendCall?.params.message).toBe('Execute kanban task');
+    expect(sendCall?.params.thinking).toBe('high');
+    expect(sendCall?.params.key).toBe(createCall?.params.key);
+    expect(String(sendCall?.params.message)).not.toContain('[spawn-subagent]');
   });
 
-  it('returns the deterministic run correlation key and runId', async () => {
+  it('returns the deterministic run correlation key, child session key, and runId', async () => {
     const result = await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
@@ -127,34 +120,32 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
     });
 
     expect(result.sessionKey).toBe('kanban-root:test-kanban-run');
+    expect(result.parentSessionKey).toBe('agent:reviewer:main');
+    expect(result.childSessionKey).toMatch(/^agent:reviewer:subagent:/);
     expect(result.runId).toBe('mock-run-id-12345');
   });
 
-  it('returns the known session keys snapshot captured before spawn', async () => {
+  it('returns a compatibility snapshot containing the parent key', async () => {
     const result = await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
       parentSessionKey: 'agent:reviewer:main',
     });
 
-    expect(result.knownSessionKeysBefore).toEqual([
-      'agent:main:main',
-      'agent:reviewer:main',
-      'agent:reviewer:subagent:existing-child',
-    ]);
+    expect(result.knownSessionKeysBefore).toEqual(['agent:reviewer:main']);
   });
 
-  it('generates an idempotency key for chat.send', async () => {
+  it('generates an idempotency key for sessions.send', async () => {
     await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',
       task: 'Execute kanban task',
       parentSessionKey: 'agent:reviewer:main',
     });
 
-    const chatSendCall = calls.find(c => c.method === 'chat.send');
-    expect(chatSendCall?.params.idempotencyKey).toBeDefined();
-    expect(typeof chatSendCall?.params.idempotencyKey).toBe('string');
-    expect((chatSendCall?.params.idempotencyKey as string).length).toBeGreaterThan(0);
+    const sendCall = calls.find((c) => c.method === 'sessions.send');
+    expect(sendCall?.params.idempotencyKey).toBeDefined();
+    expect(typeof sendCall?.params.idempotencyKey).toBe('string');
+    expect((sendCall?.params.idempotencyKey as string).length).toBeGreaterThan(0);
   });
 });
 

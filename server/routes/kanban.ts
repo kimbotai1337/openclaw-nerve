@@ -120,6 +120,7 @@ interface KanbanRunIdentity {
 interface KanbanFallbackRunIdentity {
   correlationKey: string;
   parentSessionKey: string;
+  childSessionKey?: string;
   expectedChildLabel: string;
   knownSessionKeysBefore: string[];
   runId?: string;
@@ -374,7 +375,7 @@ function pollFallbackSessionCompletion(
       }) as { sessions?: GatewaySessionSummary[] };
       const sessions = Array.isArray(sessionsResponse.sessions) ? sessionsResponse.sessions : [];
 
-      let activeSessionKey = task.run?.childSessionKey ?? task.run?.sessionId;
+      let activeSessionKey = task.run?.childSessionKey ?? task.run?.sessionId ?? identity.childSessionKey;
       if (!activeSessionKey) {
         const spawned = pickSpawnedChildSession(sessions, identity);
         const spawnedSessionKey = spawned ? getSessionKey(spawned) : null;
@@ -1213,6 +1214,7 @@ Deliver your result as a clear summary of what was done.`,
       let launchResult: {
         sessionKey: string;
         parentSessionKey: string;
+        childSessionKey?: string;
         knownSessionKeysBefore: string[];
         runId?: string;
       };
@@ -1245,8 +1247,9 @@ Deliver your result as a clear summary of what was done.`,
       }
 
       try {
-        if (launchResult.runId) {
+        if (launchResult.runId || launchResult.childSessionKey) {
           await store.attachRunIdentifiers(id, fallbackLaunch.sessionKey, {
+            childSessionKey: launchResult.childSessionKey,
             runId: launchResult.runId,
           });
         }
@@ -1257,6 +1260,7 @@ Deliver your result as a clear summary of what was done.`,
       pollFallbackSessionCompletion(store, id, {
         correlationKey: fallbackLaunch.sessionKey,
         parentSessionKey: fallbackLaunch.parentSessionKey,
+        childSessionKey: launchResult.childSessionKey,
         expectedChildLabel: fallbackLaunch.label,
         knownSessionKeysBefore: launchResult.knownSessionKeysBefore,
         runId: launchResult.runId,
