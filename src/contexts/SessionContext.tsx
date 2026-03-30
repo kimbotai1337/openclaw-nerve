@@ -77,6 +77,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [agentName, setAgentName] = useState('Agent');
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<Set<string>>(new Set());
   const unreadSessionKeysRef = useRef(unreadSessionKeys);
+  const soundEnabledRef = useRef(soundEnabled);
   const logStateRef = useRef<Record<string, boolean>>({});
   const toolSeenRef = useRef<Map<string, number>>(new Map());
   const doneTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -103,6 +104,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     unreadSessionKeysRef.current = unreadSessionKeys;
   }, [unreadSessionKeys]);
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
 
   const markSessionRead = useCallback((key: string) => {
     if (!unreadSessionKeysRef.current.has(key)) return;
@@ -177,14 +182,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     currentSessionRef.current = currentSession;
   }, [currentSession]);
 
-  const markSessionUnread = useCallback((sessionKey: string, { ping = false }: { ping?: boolean } = {}) => {
+  const markSessionUnread = useCallback((sessionKey: string) => {
     if (!sessionKey || currentSessionRef.current === sessionKey || unreadSessionKeysRef.current.has(sessionKey)) return;
     const next = new Set(unreadSessionKeysRef.current);
     next.add(sessionKey);
     unreadSessionKeysRef.current = next;
     setUnreadSessionKeys(next);
-    if (ping && soundEnabled) playPing();
-  }, [soundEnabled]);
+  }, []);
+
+  const pingSession = useCallback((sessionKey: string) => {
+    if (!sessionKey || currentSessionRef.current === sessionKey || !soundEnabledRef.current) return;
+    playPing();
+  }, []);
 
   const findDescendantSessionKeys = useCallback((sessionKey: string, sourceSessions: Session[] = sessionsRef.current) => {
     const roots = buildSessionTree(sourceSessions);
@@ -561,12 +570,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             } else if (phase === 'end') {
               setGranularStatus(sk, { status: 'DONE', since: Date.now() });
               if (isTopLevelAgentSessionKey(sk)) {
-                markSessionUnread(sk, { ping: true });
+                markSessionUnread(sk);
+                pingSession(sk);
               }
               refreshSessions();
               scheduleDelayedRefresh();
             } else if (phase === 'error') {
               setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
+              if (isTopLevelAgentSessionKey(sk)) {
+                markSessionUnread(sk);
+                pingSession(sk);
+              }
               refreshSessions();
             }
           } else if (ap.stream === 'tool' && ap.data) {
@@ -594,20 +608,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (state === 'started') {
             setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             if (isTopLevelAgentSessionKey(sk)) {
-              markSessionUnread(sk, { ping: true });
+              markSessionUnread(sk);
             }
           } else if (state === 'delta') {
             setGranularStatus(sk, { status: 'STREAMING', since: Date.now() });
           } else if (state === 'final') {
             setGranularStatus(sk, { status: 'DONE', since: Date.now() });
             if (isTopLevelAgentSessionKey(sk)) {
-              markSessionUnread(sk, { ping: true });
+              markSessionUnread(sk);
+              pingSession(sk);
             }
             refreshSessions();
             // Delayed refresh to catch token counts that may not be available immediately.
             scheduleDelayedRefresh();
           } else if (state === 'error') {
             setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
+            if (isTopLevelAgentSessionKey(sk)) {
+              markSessionUnread(sk);
+              pingSession(sk);
+            }
           } else if (state === 'aborted') {
             setGranularStatus(sk, { status: 'IDLE', since: Date.now() });
           }
@@ -657,7 +676,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         delayedRefreshTimeoutRef.current = null;
       }
     };
-  }, [subscribe, addEvent, setGranularStatus, markSessionUnread, feedAgentLog, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
+  }, [subscribe, addEvent, setGranularStatus, markSessionUnread, pingSession, feedAgentLog, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
 
   // Poll sessions when connected (reduced to 30s - WebSocket events provide real-time updates)
   useEffect(() => {

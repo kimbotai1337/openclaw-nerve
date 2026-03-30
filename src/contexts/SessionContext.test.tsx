@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { SessionProvider, useSessionContext } from './SessionContext';
 import { getSessionKey, type GatewayEvent } from '@/types';
@@ -8,6 +8,7 @@ const mockUseSettings = vi.fn();
 const playPingMock = vi.fn();
 let rpcMock: ReturnType<typeof vi.fn>;
 let subscribedHandler: ((msg: GatewayEvent) => void) | null = null;
+let soundEnabledValue = true;
 
 vi.mock('./GatewayContext', () => ({
   useGateway: () => mockUseGateway(),
@@ -55,10 +56,20 @@ function SessionUnreadProbe() {
   );
 }
 
+function SessionStatusProbe() {
+  const { agentStatus } = useSessionContext();
+  return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
+}
+
 describe('SessionContext', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     subscribedHandler = null;
+    soundEnabledValue = true;
 
     rpcMock = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === 'sessions.list') {
@@ -88,9 +99,9 @@ describe('SessionContext', () => {
       }),
     });
 
-    mockUseSettings.mockReturnValue({
-      soundEnabled: true,
-    });
+    mockUseSettings.mockImplementation(() => ({
+      soundEnabled: soundEnabledValue,
+    }));
 
     globalThis.fetch = vi.fn((input: string | URL | Request) => {
       const url = typeof input === 'string'
@@ -172,7 +183,7 @@ describe('SessionContext', () => {
     expect(rpcMock).not.toHaveBeenCalledWith('sessions.list', expect.objectContaining({ activeMinutes: expect.any(Number) }));
   });
 
-  it('marks background top-level roots unread and plays a ping when a new chat arrives', async () => {
+  it('marks background top-level roots unread on start and pings when chat reaches a terminal event', async () => {
     rpcMock.mockImplementation(async (method: string) => {
       if (method === 'sessions.list') {
         return {
@@ -209,6 +220,20 @@ describe('SessionContext', () => {
     await waitFor(() => {
       expect(screen.getByTestId('reviewer-unread').textContent).toBe('true');
     });
+    expect(playPingMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          state: 'final',
+        },
+      });
+      await Promise.resolve();
+    });
+
     expect(playPingMock).toHaveBeenCalledTimes(1);
   });
 
@@ -300,5 +325,62 @@ describe('SessionContext', () => {
     });
     expect(screen.getByTestId('reviewer-unread').textContent).toBe('false');
     expect(playPingMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the DONE-to-IDLE timer alive when sound is toggled mid-response', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const view = render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(subscribedHandler).not.toBeNull();
+    });
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          state: 'final',
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+
+    await act(async () => {
+      soundEnabledValue = false;
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_100);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
   });
 });
