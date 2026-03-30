@@ -377,8 +377,7 @@ describe('SessionContext', () => {
     });
 
     await act(async () => {
-      vi.advanceTimersByTime(3_100);
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3_100);
     });
 
     expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');

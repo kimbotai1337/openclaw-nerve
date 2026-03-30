@@ -664,9 +664,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       feedAgentLog(evt, p);
     });
 
-    // Cleanup: cancel all pending DONE→IDLE timeouts
     return () => {
       unsub();
+    };
+  }, [subscribe, addEvent, setGranularStatus, markSessionUnread, pingSession, feedAgentLog, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
+
+  useEffect(() => {
+    return () => {
       for (const key of Object.keys(doneTimeoutsRef.current)) {
         clearTimeout(doneTimeoutsRef.current[key]);
       }
@@ -676,7 +680,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         delayedRefreshTimeoutRef.current = null;
       }
     };
-  }, [subscribe, addEvent, setGranularStatus, markSessionUnread, pingSession, feedAgentLog, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
+  }, []);
 
   // Poll sessions when connected (reduced to 30s - WebSocket events provide real-time updates)
   useEffect(() => {
