@@ -112,6 +112,41 @@ describe('launchKanbanFallbackSubagentViaRpc', () => {
     expect(String(sendCall?.params.message)).not.toContain('[spawn-subagent]');
   });
 
+  it('deletes the created child session when sessions.send fails after sessions.create', async () => {
+    vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method, params) => {
+      calls.push({ method, params });
+
+      if (method === 'sessions.create') {
+        return {
+          ok: true,
+          key: String(params.key),
+        };
+      }
+      if (method === 'sessions.send') {
+        throw new Error('send failed');
+      }
+      if (method === 'sessions.delete') {
+        return { ok: true };
+      }
+      return {};
+    });
+
+    await expect(launchKanbanFallbackSubagentViaRpc({
+      label: 'test-kanban-run',
+      task: 'Execute kanban task',
+      parentSessionKey: 'agent:reviewer:main',
+    })).rejects.toThrow('send failed');
+
+    const createCall = calls.find((c) => c.method === 'sessions.create');
+    const deleteCall = calls.find((c) => c.method === 'sessions.delete');
+
+    expect(createCall).toBeDefined();
+    expect(deleteCall?.params).toEqual({
+      key: createCall?.params.key,
+      deleteTranscript: true,
+    });
+  });
+
   it('returns the deterministic run correlation key, child session key, and runId', async () => {
     const result = await launchKanbanFallbackSubagentViaRpc({
       label: 'test-kanban-run',

@@ -85,12 +85,25 @@ export async function launchKanbanFallbackSubagentViaRpc(params: {
       ? createResponse.sessionKey
       : childSessionKey;
 
-  const sendResponse = await gatewayRpcCall('sessions.send', {
-    key: resolvedChildSessionKey,
-    message: params.task,
-    ...(params.thinking ? { thinking: params.thinking } : {}),
-    idempotencyKey: `kanban-subagent-${Date.now()}-${randomUUID().slice(0, 8)}`,
-  }) as { runId?: string };
+  let sendResponse: { runId?: string };
+  try {
+    sendResponse = await gatewayRpcCall('sessions.send', {
+      key: resolvedChildSessionKey,
+      message: params.task,
+      ...(params.thinking ? { thinking: params.thinking } : {}),
+      idempotencyKey: `kanban-subagent-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    }) as { runId?: string };
+  } catch (error) {
+    try {
+      await gatewayRpcCall('sessions.delete', {
+        key: resolvedChildSessionKey,
+        deleteTranscript: true,
+      });
+    } catch {
+      // Best-effort cleanup only; preserve the original launch failure.
+    }
+    throw error;
+  }
 
   return {
     sessionKey,
