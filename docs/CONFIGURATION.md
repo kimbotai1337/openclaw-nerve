@@ -109,10 +109,14 @@ HOST=127.0.0.1
 |----------|---------|----------|-------------|
 | `GATEWAY_TOKEN` | — | **Yes** | Authentication token for the OpenClaw gateway. The setup wizard auto-detects this. See note below |
 | `GATEWAY_URL` | `http://127.0.0.1:18789` | No | Gateway HTTP endpoint URL |
+| `NERVE_PUBLIC_ORIGIN` | *(empty)* | No | Explicit browser-facing Nerve origin used when server-side gateway RPC fallback must open its own WebSocket to OpenClaw. Useful for reverse-proxy, cloud, and hybrid deployments. |
 
 ```bash
 GATEWAY_TOKEN=your-token-here
 GATEWAY_URL=http://127.0.0.1:18789
+
+# Optional for reverse-proxy / cloud / hybrid installs
+NERVE_PUBLIC_ORIGIN=https://nerve.example.com
 ```
 
 For non-interactive installs that should talk to a remote gateway, pass the URL directly to the installer:
@@ -121,6 +125,8 @@ For non-interactive installs that should talk to a remote gateway, pass the URL 
 curl -fsSL https://raw.githubusercontent.com/daggerhashimoto/openclaw-nerve/master/install.sh \
   | bash -s -- --gateway-url https://gw.example.com --gateway-token <token> --skip-setup
 ```
+
+If remote workspace panels (Files, Memory, Config, Skills) fail with `origin not allowed` while chat still works, set `NERVE_PUBLIC_ORIGIN` to the exact browser origin and add that same origin to `gateway.controlUi.allowedOrigins` on the gateway.
 
 ### Token Injection
 

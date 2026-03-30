@@ -1737,7 +1737,7 @@ Execute a task and move it to `in-progress`. The launch path depends on the task
 **Response:** The updated `KanbanTask` object with `status: "in-progress"` and a `run` object.
 
 **Execution paths:**
-- **Assigned tasks** run through the assignee's live root session. Nerve verifies that parent root exists, then asks it to spawn a child worker.
+- **Assigned tasks** create a real child session beneath the assignee's live root. Nerve verifies that the parent root exists, creates the child with `sessions.create(parentSessionKey=...)`, then sends the task into that child with `sessions.send`.
 - **Unassigned or `operator` tasks** use the normal `sessions_spawn` path.
 - **macOS fallback rule:** unassigned or `operator` tasks are rejected. Assign the task to a live worker root first.
 
@@ -1752,6 +1752,8 @@ Execute a task and move it to `in-progress`. The launch path depends on the task
 
 **Notes:**
 - The spawned worker receives the task title and description as its prompt.
+- Assigned-task runs keep both a deterministic run correlation key and the real `childSessionKey`.
+- When an assigned child session finishes or fails, Nerve sends a completion report back to the parent root session.
 - Backend pollers run every 5 seconds for up to **720 attempts / 60 minutes**.
 - On success the task moves to `review`. On error it moves back to `todo`.
 

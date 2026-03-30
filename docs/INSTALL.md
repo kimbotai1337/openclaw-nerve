@@ -51,7 +51,7 @@ You must:
 
 You may apply minimal localhost-safe OpenClaw changes automatically when needed for the default local path. Examples:
 - adding missing local control UI origins
-- adding required gateway tool allow entries such as `cron` and `gateway`
+- adding required gateway tool allow entries such as `cron`, `gateway`, and `sessions_spawn`
 - fixing local device pairing or scopes needed for Nerve to connect
 
 Ask first before any OpenClaw change that is remote, public, security-sensitive, destructive, or changes network exposure.

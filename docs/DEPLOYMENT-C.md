@@ -86,6 +86,7 @@ In `.env`:
 ```bash
 GATEWAY_URL=<remote-gateway-url>
 WS_ALLOWED_HOSTS=<remote-gateway-hostname-or-ip>
+NERVE_PUBLIC_ORIGIN=https://nerve.example.com
 ```
 
 ### Patch remote gateway allowed origins

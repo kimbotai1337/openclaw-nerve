@@ -576,9 +576,12 @@ This prevents stale overwrites from concurrent editors (drag-and-drop, API clien
    |    +-- gatewayRpcCall('sessions.list', ...) confirms the parent root exists
    |    +-- store.executeTask(..., { sessionKey }) -> status = in-progress, run.status = running
    |    +-- launchKanbanFallbackSubagentViaRpc({ label, task, parentSessionKey, model?, thinking? })
-   |         +-- gatewayRpcCall('chat.send', { sessionKey: parentSessionKey, message:'[spawn-subagent]...', idempotencyKey })
-   |         +-- attach returned runId when available
-   |         +-- start pollFallbackSessionCompletion(taskId, { correlationKey, parentSessionKey, expectedChildLabel, knownSessionKeysBefore, runId? })
+   |         +-- gatewayRpcCall('sessions.create', { key: childSessionKey, parentSessionKey, label, model? })
+   |         +-- gatewayRpcCall('sessions.send', { key: childSessionKey, message: task, thinking?, idempotencyKey })
+   |         +-- if send fails after create: best-effort gatewayRpcCall('sessions.delete', { key: childSessionKey, deleteTranscript: true })
+   |         +-- return correlationKey + childSessionKey + runId?
+   |         +-- attach childSessionKey / runId immediately when available
+   |         +-- start pollFallbackSessionCompletion(taskId, { correlationKey, parentSessionKey, childSessionKey?, expectedChildLabel, knownSessionKeysBefore, runId? })
    |
    +-- else if task is unassigned / operator:
    |    +-- on macOS: return 409 invalid_execution_target
@@ -592,17 +595,16 @@ This prevents stale overwrites from concurrent editors (drag-and-drop, API clien
 2. pollSessionCompletion() / pollFallbackSessionCompletion()
    +-- sessions_spawn path polls gateway subagents by correlation key / childSessionKey / runId
    +-- assignee-root path polls gateway RPC sessions.list every 5s (max 720 attempts / 60 min)
-   +-- assignee-root path matches the spawned child beneath the parent root and attaches childSessionKey
-   +-- both paths complete the task when the child reports terminal success/failure
-   +-- if session not found yet:
-       +-- schedule next poll
-   +-- if session is idle and not busy/processing:
-       |   fetch session history (last 3 messages)
+   +-- assignee-root path prefers the known childSessionKey; otherwise it discovers the new child beneath the parent root and attaches it
+   +-- if the child completes successfully:
+       |   fetch child history via sessions.get / sessions_history
        |   parseKanbanMarkers(resultText) -> create proposals
        |   stripKanbanMarkers(resultText) -> clean result
-       +-- store.completeRun(taskId, sessionKey, cleanResult)
+       |   store.completeRun(taskId, sessionKey, cleanResult)
+       +-- gatewayRpcCall('sessions.send', { key: parentSessionKey, message: completionReport })
    +-- if status=error/failed:
-       +-- store.completeRun(taskId, sessionKey, undefined, errorMsg)
+       |   store.completeRun(taskId, sessionKey, undefined, errorMsg)
+       +-- gatewayRpcCall('sessions.send', { key: parentSessionKey, message: failureReport })
    +-- if task/run no longer matches the active session key:
        +-- stop polling as stale
    +-- otherwise:
@@ -613,7 +615,7 @@ This prevents stale overwrites from concurrent editors (drag-and-drop, API clien
    +-- error   -> run.status = error, task.status = todo
 ```
 
-The model cascade is: execute request `model` -> task `model` -> board config `defaultModel` -> OpenClaw's configured default model. Thinking follows the same pattern with `defaultThinking`.
+Assigned-root execution now uses real session primitives instead of synthetic marker-message spawn conventions. The model cascade is: execute request `model` -> task `model` -> board config `defaultModel` -> OpenClaw's configured default model. Thinking follows the same pattern with `defaultThinking`.
 
 ### Marker Parsing
 

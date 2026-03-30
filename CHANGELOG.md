@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-03-30
+
+### Highlights
+
+**Kanban execution now matches the real session tree.** Assigned tasks launch as real child sessions beneath the selected assignee root, task completion and failures report back to the parent root, and background root notifications no longer misfire while those updates land (PR #198).
+
+**Remote and hybrid installs are less brittle.** Nerve now supports remote-gateway installation up front via `--gateway-url`, resolves gateway RPC origins from public config for remote workspace access, and explains missing cron capability with a clear remediation path instead of a dead-end warning (PR #181, PR #197, PR #200).
+
+**Session and agent state are less misleading.** The model picker now reflects the active OpenClaw config, duplicate root-agent creation correctly registers suffixed agents in `openclaw.json`, direct-message sessions nest under the correct agent root, and the main root label stays canonical (PR #174, PR #185, PR #192, PR #196).
+
+**Docs and setup guidance caught back up to reality.** AI setup docs landed, setup now prints the right deployment guide links, and stale operator docs were refreshed to match the current runtime and installer behavior (PR #179, PR #182, PR #191).
+
+### Added
+- Installer support for `--gateway-url` so Nerve can target a remote gateway from first boot (PR #181)
+- AI agent setup docs and a raw install contract for agent-driven installs (PR #182)
+- Kanban task lookup by id and support for custom board column keys via board config (PR #176, PR #173)
+- Shebang-based syntax highlighting for extensionless executable files (PR #190)
+
+### Changed
+- Setup now prints deployment guide links after configuration so operators can jump straight to the right topology docs (PR #179)
+- Setup now ensures `sessions_spawn` is allowlisted alongside the other required gateway tools for Kanban execution on current OpenClaw builds (PR #159)
+- Model selection now comes from the active OpenClaw config instead of Nerve-side fallback lists (PR #174)
+- Chat input helper text now points users at the command palette more clearly (PR #175)
+
+### Fixed
+- Skills API parsing now falls back to structured stderr JSON output when tools emit machine-readable results there (PR #161)
+- Sidebar session tree cleanup: only real roots are shown, direct-message sessions nest under their owning agent root, and `agent:main:main` always renders with a canonical label (PR #177, PR #185, PR #196)
+- Session selection click targets are more forgiving thanks to a small hover delay that reduces accidental steals while moving through the tree (PR #187)
+- Duplicate root-agent creation now registers the correct suffixed agent in `openclaw.json` so config, workspace, and session roots stay aligned (PR #192)
+- Assigned Kanban tasks now launch as real child sessions, clean up orphaned child sessions on partial launch failures, and report completion back to the parent root that owns the work (PR #198)
+- Background top-level root updates now set unread state correctly and only ping on terminal events (PR #198)
+- Remote-workspace gateway RPC now derives its request origin from public config instead of hardcoded loopback values, fixing hybrid/cloud `origin not allowed` failures (PR #200)
+
+### Documentation
+- Added AI setup docs and refreshed stale repo docs so installation, deployment, configuration, and troubleshooting guidance line up with the current runtime (PR #182, PR #191)
+
 ## [1.5.1] - 2026-03-25
 
 ### Fixed
