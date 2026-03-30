@@ -113,6 +113,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setCurrentSession = useCallback((key: string) => {
+    currentSessionRef.current = key;
     setCurrentSessionRaw(key);
     markSessionRead(key);
   }, [markSessionRead]);
@@ -479,13 +480,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // If nothing changed, return the same array reference
         return hasChanges ? merged : prev;
       });
-      setCurrentSessionRaw(nextCurrentSession);
+      setCurrentSession(nextCurrentSession);
     } catch (err) {
       console.debug('[SessionContext] Failed to refresh sessions:', err);
     } finally {
       setSessionsLoading(false);
     }
-  }, [connectionState, listAuthoritativeSessions]);
+  }, [connectionState, listAuthoritativeSessions, setCurrentSession]);
 
   // Update session in list from WebSocket event data
   const updateSessionFromEvent = useCallback((sessionKey: string, updates: Partial<Session>) => {
@@ -704,11 +705,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setUnreadSessionKeys(next);
     }
     if (shouldReplaceCurrent) {
-      if (nextCurrentSession) {
-        setCurrentSession(nextCurrentSession);
-      } else {
-        setCurrentSessionRaw('');
-      }
+      setCurrentSession(nextCurrentSession);
     }
   }, [findDescendantSessionKeys, listAuthoritativeSessions, rpc, setCurrentSession]);
 

@@ -259,4 +259,46 @@ describe('SessionContext', () => {
     });
     expect(playPingMock).not.toHaveBeenCalled();
   });
+
+  it('does not mark unread or ping when a root becomes current in the same act as its chat event', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionUnreadProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:main:main');
+    });
+
+    act(() => {
+      screen.getByTestId('select-reviewer').click();
+      subscribedHandler?.({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          state: 'started',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:reviewer:main');
+    });
+    expect(screen.getByTestId('reviewer-unread').textContent).toBe('false');
+    expect(playPingMock).not.toHaveBeenCalled();
+  });
 });
