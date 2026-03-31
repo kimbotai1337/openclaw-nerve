@@ -738,9 +738,9 @@ npm test              # Run all tests
 npm run test:coverage # With V8 coverage
 ```
 
-### Test Files
+### Test Coverage Areas
 
-48 test files, 692 tests. Key areas:
+The Vitest suite spans server code, client features, hooks, and shared utilities. Representative areas:
 
 | Area | Files | Coverage |
 |------|-------|----------|
