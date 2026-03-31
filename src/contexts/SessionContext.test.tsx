@@ -7,6 +7,8 @@ const mockUseGateway = vi.fn();
 const mockUseSettings = vi.fn();
 const playPingMock = vi.fn();
 let rpcMock: ReturnType<typeof vi.fn>;
+let subscribeMock: ReturnType<typeof vi.fn>;
+let connectionStateValue: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' = 'connected';
 let subscribedHandler: ((msg: GatewayEvent) => void) | null = null;
 let soundEnabledValue = true;
 
@@ -70,6 +72,7 @@ describe('SessionContext', () => {
     vi.clearAllMocks();
     subscribedHandler = null;
     soundEnabledValue = true;
+    connectionStateValue = 'connected';
 
     rpcMock = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === 'sessions.list') {
@@ -90,14 +93,16 @@ describe('SessionContext', () => {
       return {};
     });
 
-    mockUseGateway.mockReturnValue({
-      connectionState: 'connected',
-      rpc: rpcMock,
-      subscribe: vi.fn((handler: (msg: GatewayEvent) => void) => {
-        subscribedHandler = handler;
-        return () => {};
-      }),
+    subscribeMock = vi.fn((handler: (msg: GatewayEvent) => void) => {
+      subscribedHandler = handler;
+      return () => {};
     });
+
+    mockUseGateway.mockImplementation(() => ({
+      connectionState: connectionStateValue,
+      rpc: rpcMock,
+      subscribe: subscribeMock,
+    }));
 
     mockUseSettings.mockImplementation(() => ({
       soundEnabled: soundEnabledValue,
@@ -381,5 +386,65 @@ describe('SessionContext', () => {
     });
 
     expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+  });
+
+  it('uses the latest refresh callback for delayed refreshes after gateway changes', async () => {
+    const rpcBeforeReconnect = vi.fn(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+    const rpcAfterReconnect = vi.fn(async () => ({}));
+    rpcMock = rpcBeforeReconnect;
+
+    const view = render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(rpcBeforeReconnect).toHaveBeenCalledWith('sessions.list', { limit: 1000 });
+    });
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          state: 'final',
+        },
+      });
+      await Promise.resolve();
+    });
+
+    const preReconnectSessionsListCalls = rpcBeforeReconnect.mock.calls.filter(([method]) => method === 'sessions.list').length;
+
+    await act(async () => {
+      connectionStateValue = 'reconnecting';
+      rpcMock = rpcAfterReconnect;
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_600);
+    });
+
+    expect(rpcBeforeReconnect.mock.calls.filter(([method]) => method === 'sessions.list')).toHaveLength(preReconnectSessionsListCalls);
+    expect(rpcAfterReconnect).not.toHaveBeenCalledWith('sessions.list', expect.anything());
   });
 });

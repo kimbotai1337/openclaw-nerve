@@ -497,6 +497,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [connectionState, listAuthoritativeSessions, setCurrentSession]);
 
+  const refreshSessionsRef = useRef(refreshSessions);
+  useEffect(() => {
+    refreshSessionsRef.current = refreshSessions;
+  }, [refreshSessions]);
+
   // Update session in list from WebSocket event data
   const updateSessionFromEvent = useCallback((sessionKey: string, updates: Partial<Session>) => {
     setSessions(prev => {
@@ -540,9 +545,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     delayedRefreshTimeoutRef.current = setTimeout(() => {
       delayedRefreshTimeoutRef.current = null;
-      refreshSessions();
+      void refreshSessionsRef.current();
     }, 1500);
-  }, [refreshSessions]);
+  }, []);
 
   // Subscribe to gateway events for granular status tracking + session state sync + agent log + event log
   useEffect(() => {
