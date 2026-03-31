@@ -509,7 +509,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (idx === -1) {
         // New session appeared that we don't have - schedule a refresh
         // Use setTimeout to avoid calling during render
-        setTimeout(() => refreshSessions(), 100);
+        setTimeout(() => {
+          void refreshSessionsRef.current();
+        }, 100);
         return prev;
       }
       
@@ -528,7 +530,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return { ...s, ...updates, lastActivity: Date.now() };
       });
     });
-  }, [refreshSessions]);
+  }, []);
 
   // Extract session updates (state + token data) from a typed agent event payload
   const extractSessionUpdates = useCallback((state: string | undefined, payload: AgentEventPayload | ChatEventPayload): Partial<Session> => {
