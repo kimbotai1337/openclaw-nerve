@@ -141,10 +141,19 @@ If `sessions.send` fails after create succeeds:
 
 ### Unsupported-direct fallback
 If direct spawn fails with a narrow unsupported-method signal (for example exact `unknown method: sessions.create` / `unknown method: sessions.send` style failures), the route should:
-1. build the existing `[spawn-subagent]` marker message using the same `cleanup` semantics as today
-2. `chat.send` it to the parent root
-3. poll `sessions.list` to discover the new child under that root
-4. return the discovered child key
+1. snapshot the visible session keys before sending the fallback marker
+2. build the existing `[spawn-subagent]` marker message using the same `cleanup` semantics as today
+3. `chat.send` it to the parent root
+4. poll `sessions.list` to discover the new child under that root
+5. return the discovered child key
+
+### Marker fallback discovery heuristic
+Reuse the current production discovery rule from `SessionContext` so fallback behavior stays aligned with the shipping UX:
+- new child must satisfy `isSubagentSessionKey(sessionKey)`
+- new child must satisfy `isRootChildSession(sessionKey, parentSessionKey)`
+- new child must **not** be present in the pre-send session-key snapshot
+
+This keeps fallback correlation stable when the parent already has existing children. If multiple subagents are launched close together, the route should only consider children that were absent before the fallback marker send for this request.
 
 Important: do **not** use broad fallback matching like generic `invalid_request` or `not available`, because that can hide real launch bugs.
 
@@ -154,12 +163,20 @@ The completion monitor is the missing piece that makes direct spawn match the or
 
 ### Responsibilities
 For direct launches only, the monitor will:
-1. poll `sessions.list` until the child reaches a terminal/idle state
-2. if failed, capture the failure text
-3. if completed, fetch recent child history with `sessions.get`
-4. extract the last assistant-visible result text
-5. send a completion/failure report to the parent root via `sessions.send`
-6. if `cleanup=delete`, delete the child session after reporting
+1. poll `sessions.list` for the exact launched child session key
+2. track whether the launched run has actually started before treating an idle child as complete
+3. if failed, capture the failure text
+4. if completed, fetch recent child history with `sessions.get`
+5. extract the assistant result for the launched run, not an unrelated later manual message
+6. send a completion/failure report to the parent root via `sessions.send`
+7. if `cleanup=delete`, delete the child session after reporting
+
+### Correlation / completion rules
+- The monitor is anchored to the exact resolved child session key returned by launch.
+- If `runId` is available from the initial `sessions.send` ack, it should be carried through the monitor as the strongest correlation hint.
+- The monitor must not treat a freshly created child that is still idle as completed before there is evidence that the launched run started.
+- Evidence of start can come from either the captured `runId` showing up in session state/history, or the child session transitioning through a busy/processing/working phase after launch.
+- Result extraction should prefer the assistant output associated with the launched run; when explicit run correlation is unavailable, use the launch timestamp plus child session key as the fallback boundary so later manual follow-up messages are not mistaken for the spawned task result.
 
 ### Parent report format
 Mirror the Kanban report style, but scoped to general subagent spawning. Example:
