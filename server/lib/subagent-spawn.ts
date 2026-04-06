@@ -429,25 +429,12 @@ async function launchDirect(params: SpawnSubagentParams): Promise<SpawnSubagentR
 
   const launchTimestamp = Date.now();
 
-  let sendResponse: { runId?: string };
-  try {
-    sendResponse = await gatewayRpcCall('sessions.send', {
-      key: sessionKey,
-      message: params.task,
-      ...(params.thinking ? { thinking: params.thinking } : {}),
-      idempotencyKey: `subagent-spawn:${Date.now()}:${randomUUID().slice(0, 8)}`,
-    }) as { runId?: string };
-  } catch (error) {
-    try {
-      await gatewayRpcCall('sessions.delete', {
-        key: sessionKey,
-        deleteTranscript: true,
-      });
-    } catch {
-      // Best-effort orphan cleanup only.
-    }
-    throw error;
-  }
+  const sendResponse = await gatewayRpcCall('sessions.send', {
+    key: sessionKey,
+    message: params.task,
+    ...(params.thinking ? { thinking: params.thinking } : {}),
+    idempotencyKey: `subagent-spawn:${Date.now()}:${randomUUID().slice(0, 8)}`,
+  }) as { runId?: string };
 
   startCompletionMonitor({
     parentSessionKey: params.parentSessionKey,

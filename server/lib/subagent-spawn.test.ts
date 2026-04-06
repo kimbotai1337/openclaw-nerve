@@ -139,7 +139,7 @@ describe('subagent-spawn helper', () => {
     }));
   });
 
-  it('best-effort deletes the orphan child when sessions.send fails after create', async () => {
+  it('does not delete the child when sessions.send fails after create', async () => {
     const rpcMock = vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method, params) => {
       if (method === 'sessions.create') return { key: 'agent:reviewer:subagent:canonical' };
       if (method === 'sessions.send' && params.key === 'agent:reviewer:subagent:canonical') {
@@ -154,10 +154,7 @@ describe('subagent-spawn helper', () => {
       task: 'Reply with exactly: OK',
     })).rejects.toThrow('send failed');
 
-    expect(rpcMock).toHaveBeenCalledWith('sessions.delete', {
-      key: 'agent:reviewer:subagent:canonical',
-      deleteTranscript: true,
-    });
+    expect(rpcMock).not.toHaveBeenCalledWith('sessions.delete', expect.anything());
   });
 
   it('reports completion back to the parent on direct success', async () => {
