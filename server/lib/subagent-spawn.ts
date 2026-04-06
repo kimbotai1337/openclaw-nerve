@@ -296,7 +296,7 @@ export function pickMarkerSpawnedChildSession(
     return !knownSessionKeysBefore.has(sessionKey);
   });
 
-  return candidates.length === 1 ? candidates[0] : null;
+  return candidates[0] ?? null;
 }
 
 function startCompletionMonitor(params: {

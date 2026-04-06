@@ -340,6 +340,42 @@ describe('subagent-spawn helper', () => {
     }));
   });
 
+  it('falls back to the first new child instead of timing out when multiple candidates appear', async () => {
+    let listCallCount = 0;
+
+    vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method) => {
+      if (method === 'sessions.create') throw new Error('unknown method: sessions.create');
+      if (method === 'sessions.list') {
+        listCallCount += 1;
+        if (listCallCount === 1) {
+          return { sessions: [{ sessionKey: 'agent:reviewer:main' }] };
+        }
+        return {
+          sessions: [
+            { sessionKey: 'agent:reviewer:main' },
+            { sessionKey: 'agent:reviewer:subagent:new-child-a' },
+            { sessionKey: 'agent:reviewer:subagent:new-child-b' },
+          ],
+        };
+      }
+      if (method === 'chat.send') return { ok: true };
+      throw new Error(`unexpected ${method}`);
+    });
+
+    const resultPromise = spawnSubagent({
+      parentSessionKey: 'agent:reviewer:main',
+      task: 'Do something',
+      cleanup: 'keep',
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionKey: 'agent:reviewer:subagent:new-child-a',
+      mode: 'marker',
+    });
+  });
+
   it('does not hide generic direct-launch errors behind marker fallback', async () => {
     vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method) => {
       if (method === 'sessions.create') throw new Error('parent root not found');
