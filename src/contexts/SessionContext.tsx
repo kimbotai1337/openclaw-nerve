@@ -17,14 +17,14 @@ import {
   pickDefaultSessionKey,
   getRootAgentId,
 } from '@/features/sessions/sessionKeys';
-import type { SubagentCleanupMode } from '@/features/sessions/buildSpawnSubagentMessage';
 
 const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'started']);
 const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed']);
 
-// sessions.list query defaults.
 // Use the full session list for the sidebar so older root chats stay visible.
 const FULL_SESSIONS_LIMIT = 1000;
+
+export type SubagentCleanupMode = 'keep' | 'delete';
 
 export interface SpawnSessionOpts {
   kind: 'root' | 'subagent';

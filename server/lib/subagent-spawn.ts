@@ -30,7 +30,6 @@ export interface SpawnSubagentResult {
 interface GatewaySessionSummary {
   key?: string;
   sessionKey?: string;
-  label?: string;
   status?: string;
   error?: string;
   agentState?: string;
@@ -39,12 +38,6 @@ interface GatewaySessionSummary {
   runId?: string;
   currentRunId?: string;
   latestRunId?: string;
-}
-
-interface LaunchResult {
-  sessionKey: string;
-  runId?: string;
-  mode: 'direct';
 }
 
 interface LaunchMessage {
@@ -303,8 +296,7 @@ export function pickMarkerSpawnedChildSession(
     return !knownSessionKeysBefore.has(sessionKey);
   });
 
-  if (candidates.length === 1) return candidates[0];
-  return null;
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function startCompletionMonitor(params: {
@@ -416,7 +408,7 @@ function startCompletionMonitor(params: {
   schedule(() => { void poll(); }, MONITOR_INITIAL_DELAY_MS);
 }
 
-async function launchDirect(params: SpawnSubagentParams): Promise<LaunchResult> {
+async function launchDirect(params: SpawnSubagentParams): Promise<SpawnSubagentResult> {
   if (!isTopLevelRootSessionKey(params.parentSessionKey)) {
     throw new Error(`parentSessionKey must be a top-level root session key (agent:<id>:main): ${params.parentSessionKey}`);
   }

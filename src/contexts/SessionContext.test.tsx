@@ -337,7 +337,6 @@ describe('SessionContext', () => {
       expect(rpcMock).toHaveBeenCalledWith('chat.send', expect.objectContaining({ message: 'hi' }));
     });
 
-    // Spawn-subagent route was never called
     const spawnRouteCalled = fetchSpy.mock.calls.some(([input]) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       return url.includes('/api/sessions/spawn-subagent');
