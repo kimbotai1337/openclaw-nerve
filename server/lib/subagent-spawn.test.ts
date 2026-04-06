@@ -115,7 +115,7 @@ describe('subagent-spawn helper', () => {
   });
 
   it('resolves the canonical child key returned by sessions.create', async () => {
-    const rpcMock = vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method, params) => {
+    const rpcMock = vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method) => {
       if (method === 'sessions.create') return { key: 'agent:reviewer:subagent:canonical' };
       if (method === 'sessions.send') return { runId: 'run-123' };
       if (method === 'sessions.list') return { sessions: [] };
@@ -309,7 +309,7 @@ describe('subagent-spawn helper', () => {
 
   it('falls back to marker mode only for narrow unsupported direct-RPC errors', async () => {
     let listCallCount = 0;
-    const rpcMock = vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method, params) => {
+    const rpcMock = vi.spyOn(gatewayRpc, 'gatewayRpcCall').mockImplementation(async (method) => {
       if (method === 'sessions.create') throw new Error('unknown method: sessions.create');
       if (method === 'sessions.list') {
         listCallCount += 1;
