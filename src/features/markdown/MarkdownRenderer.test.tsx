@@ -83,6 +83,35 @@ describe('MarkdownRenderer', () => {
     expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/src/App.tsx', undefined);
   });
 
+  it('linkifies only the /workspace slice when it appears inside a token', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open path=/workspace/src/App.tsx, now"
+        onOpenWorkspacePath={onOpenWorkspacePath}
+        pathLinkPrefixes={['/workspace/']}
+      />,
+    );
+
+    const link = screen.getByRole('link', { name: '/workspace/src/App.tsx' });
+    expect(link.parentElement?.textContent).toBe('Open path=/workspace/src/App.tsx, now');
+
+    fireEvent.click(link);
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/src/App.tsx', undefined);
+  });
+
+  it('does not linkify a bare /workspace prefix with no path after it', () => {
+    render(
+      <MarkdownRenderer
+        content="Open /workspace/ later"
+        onOpenWorkspacePath={vi.fn()}
+        pathLinkPrefixes={['/workspace/']}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: '/workspace/' })).toBeNull();
+  });
+
   it('passes current document context to inline path references too', () => {
     const onOpenWorkspacePath = vi.fn();
     render(

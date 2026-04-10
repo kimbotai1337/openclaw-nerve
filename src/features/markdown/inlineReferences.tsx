@@ -1,21 +1,36 @@
 import React from 'react';
 
-const LEADING_WRAP_RE = /^[([{"']+/;
 const TRAILING_WRAP_RE = /[)\]}"'.,:;!?]+$/;
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 
-function trimCandidate(token: string): { leading: string; candidate: string; trailing: string } {
-  const leading = token.match(LEADING_WRAP_RE)?.[0] ?? '';
-  const withoutLeading = token.slice(leading.length);
-  const trailing = withoutLeading.match(TRAILING_WRAP_RE)?.[0] ?? '';
-  const candidate = trailing ? withoutLeading.slice(0, -trailing.length) : withoutLeading;
-  return { leading, candidate, trailing };
-}
+function findConfiguredPathSlice(
+  token: string,
+  prefixes: string[],
+): { before: string; candidate: string; after: string } | null {
+  if (!token) return null;
+  if (SCHEME_RE.test(token) || token.startsWith('//')) return null;
 
-function isConfiguredPathCandidate(candidate: string, prefixes: string[]): boolean {
-  if (!candidate) return false;
-  if (SCHEME_RE.test(candidate) || candidate.startsWith('//')) return false;
-  return prefixes.some((prefix) => candidate.startsWith(prefix) && candidate.length > prefix.length);
+  let bestMatch: { index: number; prefix: string } | null = null;
+
+  prefixes.forEach((prefix) => {
+    const index = token.indexOf(prefix);
+    if (index < 0) return;
+    if (!bestMatch || index < bestMatch.index || (index === bestMatch.index && prefix.length > bestMatch.prefix.length)) {
+      bestMatch = { index, prefix };
+    }
+  });
+
+  if (!bestMatch) return null;
+
+  const before = token.slice(0, bestMatch.index);
+  const fromPrefix = token.slice(bestMatch.index);
+  const trailing = fromPrefix.match(TRAILING_WRAP_RE)?.[0] ?? '';
+  const candidate = trailing ? fromPrefix.slice(0, -trailing.length) : fromPrefix;
+  const after = trailing ? token.slice(bestMatch.index + candidate.length) : '';
+
+  if (candidate.length <= bestMatch.prefix.length) return null;
+
+  return { before, candidate, after };
 }
 
 export function renderInlinePathReferences(
@@ -40,15 +55,17 @@ export function renderInlinePathReferences(
       return <React.Fragment key={`ws-${index}-${token}`}>{renderPlainText(token)}</React.Fragment>;
     }
 
-    const { leading, candidate, trailing } = trimCandidate(token);
-    if (!isConfiguredPathCandidate(candidate, prefixes)) {
+    const pathSlice = findConfiguredPathSlice(token, prefixes);
+    if (!pathSlice) {
       return <React.Fragment key={`txt-${index}-${token}`}>{renderPlainText(token)}</React.Fragment>;
     }
 
     hasLink = true;
+    const { before, candidate, after } = pathSlice;
+
     return (
-      <React.Fragment key={`path-${index}-${candidate}-${leading}-${trailing}`}>
-        {leading ? renderPlainText(leading) : null}
+      <React.Fragment key={`path-${index}-${candidate}-${before}-${after}`}>
+        {before ? renderPlainText(before) : null}
         <a
           href={candidate}
           className="markdown-link"
@@ -61,7 +78,7 @@ export function renderInlinePathReferences(
         >
           {candidate}
         </a>
-        {trailing ? renderPlainText(trailing) : null}
+        {after ? renderPlainText(after) : null}
       </React.Fragment>
     );
   });
