@@ -180,7 +180,7 @@ function gatewayFilesToTree(
     }));
 }
 
-function normalizeWorkspaceLookupPath(input: string): string {
+function normalizeWorkspaceLookupPath(input: string, workspaceRoot?: string): string {
   const trimmed = input.trim();
   if (trimmed === '/workspace' || trimmed === '/workspace/') {
     return '.';
@@ -188,6 +188,20 @@ function normalizeWorkspaceLookupPath(input: string): string {
 
   if (trimmed.startsWith('/workspace/')) {
     return trimmed.slice('/workspace/'.length);
+  }
+
+  const normalizedWorkspaceRoot = workspaceRoot
+    ? getWorkspaceRoot(workspaceRoot).split(path.sep).join('/').replace(/\/+$/, '')
+    : '';
+
+  if (normalizedWorkspaceRoot) {
+    if (trimmed === normalizedWorkspaceRoot || trimmed === `${normalizedWorkspaceRoot}/`) {
+      return '.';
+    }
+
+    if (trimmed.startsWith(`${normalizedWorkspaceRoot}/`)) {
+      return trimmed.slice(normalizedWorkspaceRoot.length + 1);
+    }
   }
 
   return trimmed;
@@ -311,14 +325,17 @@ app.get('/api/files/resolve', async (c) => {
   }
 
   const rawTargetPath = targetPath.trim().replace(/\\/g, '/');
-  const normalizedTargetPath = normalizeWorkspaceLookupPath(rawTargetPath);
+  const normalizedTargetPath = normalizeWorkspaceLookupPath(rawTargetPath, workspace.workspaceRoot);
   const workspaceRelativePath = (() => {
     if (!relativeTo) return normalizedTargetPath;
-    if (rawTargetPath === '/workspace' || rawTargetPath === '/workspace/') return '.';
-    if (rawTargetPath.startsWith('/workspace/')) return rawTargetPath.slice('/workspace/'.length);
+    if (normalizedTargetPath === '.') return '.';
+    if (normalizedTargetPath !== rawTargetPath) return normalizedTargetPath;
     if (rawTargetPath.startsWith('/')) return rawTargetPath.replace(/^\/+/, '');
 
-    const normalizedRelativeTo = normalizeWorkspaceLookupPath(relativeTo.replace(/\\/g, '/')).replace(/^\/+/, '');
+    const normalizedRelativeTo = normalizeWorkspaceLookupPath(
+      relativeTo.replace(/\\/g, '/'),
+      workspace.workspaceRoot,
+    ).replace(/^\/+/, '');
     const relativeDir = path.posix.dirname(normalizedRelativeTo);
     return path.posix.normalize(path.posix.join(relativeDir === '.' ? '' : relativeDir, normalizedTargetPath));
   })();

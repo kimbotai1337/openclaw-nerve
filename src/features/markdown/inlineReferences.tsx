@@ -2,6 +2,7 @@ import React from 'react';
 
 const TRAILING_PUNCTUATION_RE = /[.,:;!?]+$/;
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
+const CANONICAL_WORKSPACE_PREFIX = '/workspace/';
 const FILE_WORKSPACE_PREFIX = 'file:///workspace/';
 const WRAPPER_PAIRS: Array<{ opener: string; closer: string }> = [
   { opener: '`', closer: '`' },
@@ -18,55 +19,43 @@ function stripTrailingPunctuation(token: string): { core: string; trailing: stri
   };
 }
 
-function findConfiguredPrefixMatch(
-  value: string,
-  prefixes: string[],
-): { index: number; prefix: string } | null {
-  let bestMatch: { index: number; prefix: string } | null = null;
-
-  for (const prefix of prefixes) {
-    const index = value.indexOf(prefix);
-    if (index < 0) continue;
-    if (!bestMatch || index < bestMatch.index || (index === bestMatch.index && prefix.length > bestMatch.prefix.length)) {
-      bestMatch = { index, prefix };
-    }
+function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): string | null {
+  if (candidate.startsWith(FILE_WORKSPACE_PREFIX)) {
+    const normalized = candidate.slice('file://'.length);
+    return normalized.length > CANONICAL_WORKSPACE_PREFIX.length ? normalized : null;
   }
 
-  return bestMatch;
+  if (candidate.startsWith(CANONICAL_WORKSPACE_PREFIX)) {
+    return candidate.length > CANONICAL_WORKSPACE_PREFIX.length ? candidate : null;
+  }
+
+  for (const prefix of prefixes) {
+    if (!prefix || prefix === CANONICAL_WORKSPACE_PREFIX) continue;
+    if (!candidate.startsWith(prefix)) continue;
+
+    const suffix = candidate.slice(prefix.length);
+    if (!suffix) return null;
+
+    return `${CANONICAL_WORKSPACE_PREFIX}${suffix.replace(/^\/+/, '')}`;
+  }
+
+  return null;
 }
 
 function extractWrappedPathSlice(
   core: string,
   prefixes: string[],
-): { before: string; display: string; candidate: string; after: string } | null {
+): { display: string; candidate: string } | null {
   for (const { opener, closer } of WRAPPER_PAIRS) {
     if (!core.startsWith(opener) || !core.endsWith(closer)) continue;
 
     const inner = core.slice(opener.length, core.length - closer.length);
-
-    if (inner.startsWith(FILE_WORKSPACE_PREFIX)) {
-      const candidate = inner.slice('file://'.length);
-      if (candidate.length <= '/workspace/'.length) return null;
-      return {
-        before: '',
-        display: core,
-        candidate,
-        after: '',
-      };
-    }
-
-    const innerMatch = findConfiguredPrefixMatch(inner, prefixes);
-    if (!innerMatch) continue;
-
-    const candidate = inner.slice(innerMatch.index);
-    if (candidate.length <= innerMatch.prefix.length) return null;
-    if (innerMatch.index !== 0) return null;
+    const candidate = normalizeWorkspaceCandidate(inner, prefixes);
+    if (!candidate) return null;
 
     return {
-      before: '',
       display: core,
       candidate,
-      after: '',
     };
   }
 
@@ -83,31 +72,24 @@ function findConfiguredPathSlice(
   const { core, trailing } = stripTrailingPunctuation(token);
   if (!core) return null;
 
-  if (core.startsWith(FILE_WORKSPACE_PREFIX)) {
-    const candidate = core.slice('file://'.length);
-    if (candidate.length <= '/workspace/'.length) return null;
-    return { before: '', display: core, candidate, after: trailing };
+  const plainCandidate = normalizeWorkspaceCandidate(core, prefixes);
+  if (plainCandidate) {
+    return { before: '', display: core, candidate: plainCandidate, after: trailing };
   }
 
   const wrapped = extractWrappedPathSlice(core, prefixes);
   if (wrapped) {
     return {
-      ...wrapped,
-      after: `${wrapped.after}${trailing}`,
+      before: '',
+      display: wrapped.display,
+      candidate: wrapped.candidate,
+      after: trailing,
     };
   }
 
   if (SCHEME_RE.test(core)) return null;
 
-  const bestMatch = findConfiguredPrefixMatch(core, prefixes);
-  if (!bestMatch) return null;
-
-  const before = core.slice(0, bestMatch.index);
-  const candidate = core.slice(bestMatch.index);
-
-  if (candidate.length <= bestMatch.prefix.length) return null;
-
-  return { before, display: candidate, candidate, after: trailing };
+  return null;
 }
 
 export function renderInlinePathReferences(
