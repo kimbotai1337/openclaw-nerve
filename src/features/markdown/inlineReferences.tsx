@@ -12,13 +12,13 @@ function findConfiguredPathSlice(
 
   let bestMatch: { index: number; prefix: string } | null = null;
 
-  prefixes.forEach((prefix) => {
+  for (const prefix of prefixes) {
     const index = token.indexOf(prefix);
-    if (index < 0) return;
+    if (index < 0) continue;
     if (!bestMatch || index < bestMatch.index || (index === bestMatch.index && prefix.length > bestMatch.prefix.length)) {
       bestMatch = { index, prefix };
     }
-  });
+  }
 
   if (!bestMatch) return null;
 
