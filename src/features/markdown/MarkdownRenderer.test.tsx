@@ -154,9 +154,102 @@ describe('MarkdownRenderer', () => {
     expect(screen.queryByRole('link', { name: 'src/App.tsx' })).toBeNull();
   });
 
-  it('does not linkify configured path text inside inline code', () => {
-    render(<MarkdownRenderer content="Use `/workspace/src/App.tsx` later" pathLinkPrefixes={['/workspace/']} onOpenWorkspacePath={vi.fn()} />);
-    expect(screen.queryByRole('link', { name: '/workspace/src/App.tsx' })).toBeNull();
+  it('linkifies wrapped file URIs while normalizing the opened workspace path', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open file:///workspace/src/App.tsx, now"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={onOpenWorkspacePath}
+      />,
+    );
+
+    const link = screen.getByRole('link', { name: 'file:///workspace/src/App.tsx' });
+    expect(link.parentElement?.textContent).toBe('Open file:///workspace/src/App.tsx, now');
+
+    fireEvent.click(link);
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/src/App.tsx', undefined);
+  });
+
+  it('linkifies wrapped workspace paths as a single inline token', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content={"Open '/workspace/src/App.tsx' \"/workspace/src/Main.tsx\" </workspace/src/Guide.md> now"}
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={onOpenWorkspacePath}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: "'/workspace/src/App.tsx'" }));
+    fireEvent.click(screen.getByRole('link', { name: '"/workspace/src/Main.tsx"' }));
+    fireEvent.click(screen.getByRole('link', { name: '</workspace/src/Guide.md>' }));
+
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(1, '/workspace/src/App.tsx', undefined);
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(2, '/workspace/src/Main.tsx', undefined);
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(3, '/workspace/src/Guide.md', undefined);
+  });
+
+  it('keeps trailing punctuation outside wrapped workspace links', () => {
+    render(
+      <MarkdownRenderer
+        content="Open '/workspace/src/App.tsx', now"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={vi.fn()}
+      />,
+    );
+
+    const link = screen.getByRole('link', { name: "'/workspace/src/App.tsx'" });
+    expect(link.parentElement?.textContent).toBe("Open '/workspace/src/App.tsx', now");
+  });
+
+  it('does not linkify bare wrapped workspace prefixes or bare file workspace prefixes', () => {
+    render(
+      <MarkdownRenderer
+        content="Open '/workspace/' and file:///workspace/ later"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: "'/workspace/'" })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'file:///workspace/' })).toBeNull();
+  });
+
+  it('does not turn unmatched wrappers into whole wrapped links', () => {
+    render(
+      <MarkdownRenderer
+        content="Open '/workspace/src/App.tsx later"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: "'/workspace/src/App.tsx" })).toBeNull();
+    expect(screen.getByRole('link', { name: '/workspace/src/App.tsx' })).toBeInTheDocument();
+  });
+
+  it('linkifies configured path text inside inline code spans', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Use `file:///workspace/src/App.tsx` and `/workspace/src/Main.tsx` later"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={onOpenWorkspacePath}
+      />,
+    );
+
+    const fileUriLink = screen.getByRole('link', { name: 'file:///workspace/src/App.tsx' });
+    const workspaceLink = screen.getByRole('link', { name: '/workspace/src/Main.tsx' });
+
+    expect(fileUriLink.closest('code')).not.toBeNull();
+    expect(workspaceLink.closest('code')).not.toBeNull();
+
+    fireEvent.click(fileUriLink);
+    fireEvent.click(workspaceLink);
+
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(1, '/workspace/src/App.tsx', undefined);
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(2, '/workspace/src/Main.tsx', undefined);
   });
 
   it('opens workspace links in-app when a handler is provided', async () => {
