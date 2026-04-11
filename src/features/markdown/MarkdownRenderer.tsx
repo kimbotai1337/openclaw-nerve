@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { hljs } from '@/lib/highlight';
@@ -58,6 +58,35 @@ type MarkdownLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & Markdow
   children?: React.ReactNode;
   href?: string;
 };
+
+const MarkdownLinkContext = createContext(false);
+
+function InlineCodeContent({
+  codeString,
+  children,
+  pathLinkPrefixes,
+  currentDocumentPath,
+  onOpenWorkspacePath,
+}: {
+  codeString: string;
+  children?: React.ReactNode;
+  pathLinkPrefixes?: string[];
+  currentDocumentPath?: string;
+  onOpenWorkspacePath?: (path: string, basePath?: string) => void | Promise<void>;
+}) {
+  const isInsideMarkdownLink = useContext(MarkdownLinkContext);
+
+  if (isInsideMarkdownLink) {
+    return <>{children}</>;
+  }
+
+  return renderInlinePathReferences(codeString, {
+    prefixes: pathLinkPrefixes,
+    onOpenPath: onOpenWorkspacePath
+      ? (path: string) => onOpenWorkspacePath(path, currentDocumentPath)
+      : undefined,
+  });
+}
 
 function slugifyHeadingText(text: string): string {
   const normalized = text
@@ -372,12 +401,16 @@ export function MarkdownRenderer({
         }
 
         const inlineContent = inline
-          ? renderInlinePathReferences(codeString, {
-            prefixes: pathLinkPrefixes,
-            onOpenPath: onOpenWorkspacePath
-              ? (path: string) => onOpenWorkspacePath(path, currentDocumentPath)
-              : undefined,
-          })
+          ? (
+            <InlineCodeContent
+              codeString={codeString}
+              pathLinkPrefixes={pathLinkPrefixes}
+              currentDocumentPath={currentDocumentPath}
+              onOpenWorkspacePath={onOpenWorkspacePath}
+            >
+              {children}
+            </InlineCodeContent>
+          )
           : children;
 
         return (
@@ -440,44 +473,58 @@ export function MarkdownRenderer({
           const normalizedTarget = normalizeWorkspaceLinkTarget(href);
           const fragment = getWorkspaceLinkFragment(href);
           return (
-            <a
-              {...props}
-              href={href}
-              className={mergedClassName}
-              onClick={(event) => {
-                event.preventDefault();
-                Promise.resolve()
-                  .then(() => onOpenWorkspacePath(normalizedTarget, currentDocumentPath))
-                  .then(() => {
-                    if (fragment) {
-                      updateLocationHash(fragment);
-                    }
-                  })
-                  .catch((error) => {
-                    console.error('Failed to open workspace path link:', error);
-                  });
-              }}
-            >
-              {children}
-            </a>
+            <MarkdownLinkContext.Provider value={true}>
+              <a
+                {...props}
+                href={href}
+                className={mergedClassName}
+                onClick={(event) => {
+                  event.preventDefault();
+                  Promise.resolve()
+                    .then(() => onOpenWorkspacePath(normalizedTarget, currentDocumentPath))
+                    .then(() => {
+                      if (fragment) {
+                        updateLocationHash(fragment);
+                      }
+                    })
+                    .catch((error) => {
+                      console.error('Failed to open workspace path link:', error);
+                    });
+                }}
+              >
+                {children}
+              </a>
+            </MarkdownLinkContext.Provider>
           );
         }
 
         return (
-          <a
-            {...props}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={mergedClassName}
-          >
-            {children}
-          </a>
+          <MarkdownLinkContext.Provider value={true}>
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={mergedClassName}
+            >
+              {children}
+            </a>
+          </MarkdownLinkContext.Provider>
         );
       },
       ...(suppressImages ? { img: () => null } : {}),
     };
-  }, [childOptions, currentDocumentPath, onOpenBeadId, onOpenWorkspacePath, scrollToAnchor, suppressImages, updateLocationHash, workspaceAgentId]);
+  }, [
+    childOptions,
+    currentDocumentPath,
+    onOpenBeadId,
+    onOpenWorkspacePath,
+    pathLinkPrefixes,
+    scrollToAnchor,
+    suppressImages,
+    updateLocationHash,
+    workspaceAgentId,
+  ]);
 
   return (
     <div ref={containerRef} className={`markdown-content ${className}`}>

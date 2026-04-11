@@ -19,14 +19,23 @@ function stripTrailingPunctuation(token: string): { core: string; trailing: stri
   };
 }
 
+function decodeWorkspaceCandidate(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): string | null {
   if (candidate.startsWith(FILE_WORKSPACE_PREFIX)) {
-    const normalized = candidate.slice('file://'.length);
+    const normalized = decodeWorkspaceCandidate(candidate.slice('file://'.length));
     return normalized.length > CANONICAL_WORKSPACE_PREFIX.length ? normalized : null;
   }
 
   if (candidate.startsWith(CANONICAL_WORKSPACE_PREFIX)) {
-    return candidate.length > CANONICAL_WORKSPACE_PREFIX.length ? candidate : null;
+    const normalized = decodeWorkspaceCandidate(candidate);
+    return normalized.length > CANONICAL_WORKSPACE_PREFIX.length ? normalized : null;
   }
 
   for (const prefix of prefixes) {
@@ -36,7 +45,7 @@ function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): str
     const suffix = candidate.slice(prefix.length);
     if (!suffix) return null;
 
-    return `${CANONICAL_WORKSPACE_PREFIX}${suffix.replace(/^\/+/, '')}`;
+    return decodeWorkspaceCandidate(`${CANONICAL_WORKSPACE_PREFIX}${suffix.replace(/^\/+/, '')}`);
   }
 
   return null;
