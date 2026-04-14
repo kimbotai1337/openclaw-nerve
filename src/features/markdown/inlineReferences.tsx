@@ -3,6 +3,10 @@ import React from 'react';
 const TRAILING_PUNCTUATION_RE = /[.,:;!?]+$/;
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 const CANONICAL_WORKSPACE_PREFIX = '/workspace/';
+// Intentionally supported shorthand for the canonical /workspace/... path contract.
+// Keep this narrow: workspace/... is accepted, but malformed forms like bare workspace/
+// or interior-token junk (for example path=workspace/foo.md) are still rejected by the
+// tokenization and suffix checks below.
 const BARE_WORKSPACE_PREFIX = 'workspace/';
 const FILE_WORKSPACE_PREFIX = 'file:///workspace/';
 const WRAPPER_PAIRS: Array<{ opener: string; closer: string }> = [
