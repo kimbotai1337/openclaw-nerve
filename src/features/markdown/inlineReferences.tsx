@@ -32,19 +32,36 @@ function decodeWorkspaceCandidate(value: string): string {
   }
 }
 
-function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): string | null {
-  if (candidate.startsWith(FILE_WORKSPACE_PREFIX)) {
-    const normalized = decodeWorkspaceCandidate(candidate.slice('file://'.length));
+function rewriteAliasPrefix(candidate: string, aliases: Record<string, string>): string {
+  const matchingAlias = Object.entries(aliases)
+    .filter(([aliasPrefix, targetPrefix]) => aliasPrefix && targetPrefix && candidate.startsWith(aliasPrefix))
+    .sort(([leftAlias], [rightAlias]) => rightAlias.length - leftAlias.length)[0];
+
+  if (!matchingAlias) return candidate;
+
+  const [aliasPrefix, targetPrefix] = matchingAlias;
+  return `${targetPrefix}${candidate.slice(aliasPrefix.length)}`;
+}
+
+function normalizeWorkspaceCandidate(
+  candidate: string,
+  prefixes: string[],
+  aliases: Record<string, string> = {},
+): string | null {
+  const rewrittenCandidate = rewriteAliasPrefix(candidate, aliases);
+
+  if (rewrittenCandidate.startsWith(FILE_WORKSPACE_PREFIX)) {
+    const normalized = decodeWorkspaceCandidate(rewrittenCandidate.slice('file://'.length));
     return normalized.length > CANONICAL_WORKSPACE_PREFIX.length ? normalized : null;
   }
 
-  if (candidate.startsWith(CANONICAL_WORKSPACE_PREFIX)) {
-    const normalized = decodeWorkspaceCandidate(candidate);
+  if (rewrittenCandidate.startsWith(CANONICAL_WORKSPACE_PREFIX)) {
+    const normalized = decodeWorkspaceCandidate(rewrittenCandidate);
     return normalized.length > CANONICAL_WORKSPACE_PREFIX.length ? normalized : null;
   }
 
-  if (candidate.startsWith(BARE_WORKSPACE_PREFIX)) {
-    const suffix = candidate.slice(BARE_WORKSPACE_PREFIX.length);
+  if (rewrittenCandidate.startsWith(BARE_WORKSPACE_PREFIX)) {
+    const suffix = rewrittenCandidate.slice(BARE_WORKSPACE_PREFIX.length);
     if (!suffix) return null;
 
     return decodeWorkspaceCandidate(`${CANONICAL_WORKSPACE_PREFIX}${suffix}`);
@@ -52,9 +69,9 @@ function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): str
 
   for (const prefix of prefixes) {
     if (!prefix || prefix === CANONICAL_WORKSPACE_PREFIX) continue;
-    if (!candidate.startsWith(prefix)) continue;
+    if (!rewrittenCandidate.startsWith(prefix)) continue;
 
-    const suffix = candidate.slice(prefix.length);
+    const suffix = rewrittenCandidate.slice(prefix.length);
     if (!suffix) return null;
 
     return decodeWorkspaceCandidate(`${CANONICAL_WORKSPACE_PREFIX}${suffix.replace(/^\/+/, '')}`);
@@ -66,12 +83,13 @@ function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): str
 function extractWrappedPathSlice(
   core: string,
   prefixes: string[],
+  aliases: Record<string, string>,
 ): { display: string; candidate: string } | null {
   for (const { opener, closer } of WRAPPER_PAIRS) {
     if (!core.startsWith(opener) || !core.endsWith(closer)) continue;
 
     const inner = core.slice(opener.length, core.length - closer.length);
-    const candidate = normalizeWorkspaceCandidate(inner, prefixes);
+    const candidate = normalizeWorkspaceCandidate(inner, prefixes, aliases);
     if (!candidate) return null;
 
     return {
@@ -86,6 +104,7 @@ function extractWrappedPathSlice(
 function findConfiguredPathSlice(
   token: string,
   prefixes: string[],
+  aliases: Record<string, string>,
 ): { before: string; display: string; candidate: string; after: string } | null {
   if (!token) return null;
   if (token.startsWith('//')) return null;
@@ -93,12 +112,12 @@ function findConfiguredPathSlice(
   const { core, trailing } = stripTrailingPunctuation(token);
   if (!core) return null;
 
-  const plainCandidate = normalizeWorkspaceCandidate(core, prefixes);
+  const plainCandidate = normalizeWorkspaceCandidate(core, prefixes, aliases);
   if (plainCandidate) {
     return { before: '', display: core, candidate: plainCandidate, after: trailing };
   }
 
-  const wrapped = extractWrappedPathSlice(core, prefixes);
+  const wrapped = extractWrappedPathSlice(core, prefixes, aliases);
   if (wrapped) {
     return {
       before: '',
@@ -117,12 +136,13 @@ export function renderInlinePathReferences(
   text: string,
   options: {
     prefixes?: string[];
+    aliases?: Record<string, string>;
     onOpenPath?: (path: string) => void | Promise<void>;
     renderPlainText?: (text: string) => React.ReactNode;
   } = {},
 ): React.ReactNode {
-  const { prefixes = [], onOpenPath, renderPlainText = (value: string) => value } = options;
-  if (!text || prefixes.length === 0 || !onOpenPath) {
+  const { prefixes = [], aliases = {}, onOpenPath, renderPlainText = (value: string) => value } = options;
+  if (!text || !onOpenPath || (prefixes.length === 0 && Object.keys(aliases).length === 0)) {
     return renderPlainText(text);
   }
 
@@ -135,7 +155,7 @@ export function renderInlinePathReferences(
       return <React.Fragment key={`ws-${index}-${token}`}>{renderPlainText(token)}</React.Fragment>;
     }
 
-    const pathSlice = findConfiguredPathSlice(token, prefixes);
+    const pathSlice = findConfiguredPathSlice(token, prefixes, aliases);
     if (!pathSlice) {
       return <React.Fragment key={`txt-${index}-${token}`}>{renderPlainText(token)}</React.Fragment>;
     }

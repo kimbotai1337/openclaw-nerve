@@ -52,10 +52,12 @@ describe('chatPathLinksConfig', () => {
   it('normalizes, dedupes, and falls back when parsing', () => {
     expect(parseChatPathLinksConfig('{"prefixes":[" /workspace ","/workspace/","","  "]}')).toEqual({
       prefixes: ['/workspace/'],
+      aliases: {},
     });
 
     expect(parseChatPathLinksConfig('{"prefixes":[]}')).toEqual({
       prefixes: ['/workspace/'],
+      aliases: {},
     });
   });
 
@@ -72,15 +74,17 @@ describe('chatPathLinksConfig', () => {
       + '    "/workspace/",\n'
       + '    "/home/derrick/.openclaw/workspace/",\n'
       + '    "/home/derrick/workspace/"\n'
-      + '  ]\n'
+      + '  ],\n'
+      + '  "aliases": {}\n'
       + '}\n',
     );
 
-    expect(stringifyChatPathLinksConfig({ prefixes: ['/workspace', '/workspace/'] })).toBe(
+    expect(stringifyChatPathLinksConfig({ prefixes: ['/workspace', '/workspace/'], aliases: {} })).toBe(
       '{\n'
       + '  "prefixes": [\n'
       + '    "/workspace/"\n'
-      + '  ]\n'
+      + '  ],\n'
+      + '  "aliases": {}\n'
       + '}\n',
     );
   });

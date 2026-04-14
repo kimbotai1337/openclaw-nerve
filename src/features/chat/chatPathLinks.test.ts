@@ -1,28 +1,73 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_CHAT_PATH_LINKS_CONFIG, parseChatPathLinksConfig } from './chatPathLinks';
+import {
+  DEFAULT_CHAT_PATH_LINKS_CONFIG,
+  normalizeChatPathLinkAliases,
+  parseChatPathLinksConfig,
+  stringifyChatPathLinksConfig,
+} from './chatPathLinks';
 
 describe('chatPathLinks config', () => {
-  it('defaults to the canonical workspace prefix', () => {
-    expect(DEFAULT_CHAT_PATH_LINKS_CONFIG).toEqual({ prefixes: ['/workspace/'] });
+  it('defaults to the canonical workspace prefix with no aliases', () => {
+    expect(DEFAULT_CHAT_PATH_LINKS_CONFIG).toEqual({ prefixes: ['/workspace/'], aliases: {} });
   });
 
-  it('keeps configured prefixes trimmed without requiring a separate workspace shorthand entry', () => {
+  it('keeps configured prefixes trimmed while normalizing aliases to canonical workspace targets', () => {
     expect(
       parseChatPathLinksConfig(JSON.stringify({
-        prefixes: ['  /workspace/  ', '  /home/derrick/.openclaw/workspace/  '],
+        prefixes: ['  /workspace/  ', '  /home/derrick/.openclaw/workspace  '],
+        aliases: {
+          ' projects ': ' workspace/projects ',
+          'notes\\': 'file:///workspace/docs/notes',
+        },
       })),
     ).toEqual({
       prefixes: ['/workspace/', '/home/derrick/.openclaw/workspace/'],
+      aliases: {
+        'projects/': '/workspace/projects/',
+        'notes/': '/workspace/docs/notes/',
+      },
     });
   });
 
-  it('falls back to the canonical workspace prefix when prefixes are missing or empty', () => {
-    expect(parseChatPathLinksConfig('{}')).toEqual({ prefixes: ['/workspace/'] });
-    expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: [] }))).toEqual({ prefixes: ['/workspace/'] });
-    expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: ['   '] }))).toEqual({ prefixes: ['/workspace/'] });
-    expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: [123, null, false] }))).toEqual({
+  it('falls back for missing prefixes and ignores invalid aliases', () => {
+    expect(parseChatPathLinksConfig('{}')).toEqual({ prefixes: ['/workspace/'], aliases: {} });
+    expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: ['   '], aliases: [] }))).toEqual({
       prefixes: ['/workspace/'],
+      aliases: {},
     });
+
+    expect(normalizeChatPathLinkAliases({
+      '': '/workspace/projects/',
+      '/workspace/projects/': '/workspace/projects/',
+      'file://projects/': '/workspace/projects/',
+      'mailto:projects/': '/workspace/projects/',
+      'projects/': '/home/derrick/.openclaw/workspace/projects/',
+      'docs/': 'https://example.com/docs/',
+      'notes/': '',
+      'valid\\': 'workspace/docs/valid',
+      'projects\\': '/workspace/projects-override',
+    })).toEqual({
+      'valid/': '/workspace/docs/valid/',
+      'projects/': '/workspace/projects-override/',
+    });
+  });
+
+  it('serializes aliases with a trailing newline', () => {
+    expect(stringifyChatPathLinksConfig({
+      prefixes: ['/workspace', '/workspace/'],
+      aliases: {
+        'projects': 'workspace/projects',
+      },
+    })).toBe(
+      '{\n'
+      + '  "prefixes": [\n'
+      + '    "/workspace/"\n'
+      + '  ],\n'
+      + '  "aliases": {\n'
+      + '    "projects/": "/workspace/projects/"\n'
+      + '  }\n'
+      + '}\n',
+    );
   });
 });

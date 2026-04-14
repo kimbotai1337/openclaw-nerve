@@ -83,6 +83,98 @@ describe('MarkdownRenderer', () => {
     expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/src/App.tsx', undefined);
   });
 
+  it('rewrites configured shorthand aliases to canonical workspace targets exactly once', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open projects/openclaw-nerve/src/App.tsx now"
+        onOpenWorkspacePath={onOpenWorkspacePath}
+        pathLinkPrefixes={['/workspace/', '/home/derrick/.openclaw/workspace/']}
+        pathLinkAliases={{ 'projects/': '/workspace/projects/' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'projects/openclaw-nerve/src/App.tsx' }));
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/projects/openclaw-nerve/src/App.tsx', undefined);
+  });
+
+  it('linkifies alias-only configs by normalizing rewritten targets to canonical workspace paths', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open projects/openclaw-nerve/src/App.tsx now"
+        onOpenWorkspacePath={onOpenWorkspacePath}
+        pathLinkPrefixes={[]}
+        pathLinkAliases={{ 'projects/': '/workspace/projects/' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'projects/openclaw-nerve/src/App.tsx' }));
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/projects/openclaw-nerve/src/App.tsx', undefined);
+  });
+
+  it('supports alias-only configs that rewrite file workspace urls to canonical workspace paths', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open shortcut/openclaw-nerve/src/App.tsx now"
+        onOpenWorkspacePath={onOpenWorkspacePath}
+        pathLinkPrefixes={[]}
+        pathLinkAliases={{ 'shortcut/': 'file:///workspace/projects/' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'shortcut/openclaw-nerve/src/App.tsx' }));
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/projects/openclaw-nerve/src/App.tsx', undefined);
+  });
+
+  it('supports wrapped alias shorthand without widening interior-token matching', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open 'projects/openclaw-nerve/README.md' and path=projects/nope.md now"
+        onOpenWorkspacePath={onOpenWorkspacePath}
+        pathLinkPrefixes={['/workspace/']}
+        pathLinkAliases={{ 'projects/': '/workspace/projects/' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: "'projects/openclaw-nerve/README.md'" }));
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/projects/openclaw-nerve/README.md', undefined);
+    expect(screen.queryByRole('link', { name: 'projects/nope.md' })).toBeNull();
+  });
+
+  it('prefers the longest matching alias prefix when aliases overlap', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open projects/openclaw-nerve/src/App.tsx now"
+        onOpenWorkspacePath={onOpenWorkspacePath}
+        pathLinkPrefixes={['/workspace/']}
+        pathLinkAliases={{
+          'projects/': '/workspace/projects-generic/',
+          'projects/openclaw-nerve/': '/workspace/projects/openclaw-nerve/',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'projects/openclaw-nerve/src/App.tsx' }));
+    expect(onOpenWorkspacePath).toHaveBeenCalledWith('/workspace/projects/openclaw-nerve/src/App.tsx', undefined);
+  });
+
+  it('does not recurse through alias-to-alias chains', () => {
+    render(
+      <MarkdownRenderer
+        content="Open shortcut/demo.md now"
+        onOpenWorkspacePath={vi.fn()}
+        pathLinkPrefixes={['/workspace/']}
+        pathLinkAliases={{ 'shortcut/': 'projects/', 'projects/': '/workspace/projects/' }}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: 'shortcut/demo.md' })).toBeNull();
+  });
+
   it('does not linkify /workspace paths when they only appear as an interior token slice', () => {
     render(
       <MarkdownRenderer
