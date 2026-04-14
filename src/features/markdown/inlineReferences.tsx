@@ -3,6 +3,7 @@ import React from 'react';
 const TRAILING_PUNCTUATION_RE = /[.,:;!?]+$/;
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 const CANONICAL_WORKSPACE_PREFIX = '/workspace/';
+const BARE_WORKSPACE_PREFIX = 'workspace/';
 const FILE_WORKSPACE_PREFIX = 'file:///workspace/';
 const WRAPPER_PAIRS: Array<{ opener: string; closer: string }> = [
   { opener: '`', closer: '`' },
@@ -36,6 +37,13 @@ function normalizeWorkspaceCandidate(candidate: string, prefixes: string[]): str
   if (candidate.startsWith(CANONICAL_WORKSPACE_PREFIX)) {
     const normalized = decodeWorkspaceCandidate(candidate);
     return normalized.length > CANONICAL_WORKSPACE_PREFIX.length ? normalized : null;
+  }
+
+  if (candidate.startsWith(BARE_WORKSPACE_PREFIX)) {
+    const suffix = candidate.slice(BARE_WORKSPACE_PREFIX.length);
+    if (!suffix) return null;
+
+    return decodeWorkspaceCandidate(`${CANONICAL_WORKSPACE_PREFIX}${suffix}`);
   }
 
   for (const prefix of prefixes) {

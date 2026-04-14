@@ -144,9 +144,39 @@ describe('MarkdownRenderer', () => {
     consoleError.mockRestore();
   });
 
+  it('does linkify bare workspace/... forms while normalizing them to the canonical workspace target', () => {
+    const onOpenWorkspacePath = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="Open workspace/AGENTS.md and workspace/agents-sections/12-maintenance-and-updates.md now"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={onOpenWorkspacePath}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'workspace/AGENTS.md' }));
+    fireEvent.click(screen.getByRole('link', { name: 'workspace/agents-sections/12-maintenance-and-updates.md' }));
+
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(1, '/workspace/AGENTS.md', undefined);
+    expect(onOpenWorkspacePath).toHaveBeenNthCalledWith(2, '/workspace/agents-sections/12-maintenance-and-updates.md', undefined);
+  });
+
   it('does not linkify relative paths when only /workspace is configured', () => {
     render(<MarkdownRenderer content="src/App.tsx" pathLinkPrefixes={['/workspace/']} onOpenWorkspacePath={vi.fn()} />);
     expect(screen.queryByRole('link', { name: 'src/App.tsx' })).toBeNull();
+  });
+
+  it('does not promote interior bare workspace tails or a bare workspace/ prefix into links', () => {
+    render(
+      <MarkdownRenderer
+        content="Open path=workspace/AGENTS.md and workspace/ later"
+        pathLinkPrefixes={['/workspace/']}
+        onOpenWorkspacePath={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryByRole('link', { name: 'workspace/' })).toBeNull();
   });
 
   it('linkifies wrapped file URIs while normalizing the opened workspace path', () => {
