@@ -127,7 +127,7 @@ const SYSTEM_NOTIFICATION_PATTERNS = [
 const SYSTEM_EVENT_LINE = /^System(?: \(untrusted\))?: \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]/;
 
 /** Internal follow-up lines appended after async exec/cron system events. */
-const SYSTEM_EVENT_FOLLOWUP_LINE = /^(?:An async command you ran earlier has completed\.|A scheduled reminder has been triggered\.|A scheduled cron event was triggered(?:, but no event content was found)?\.|Handle this reminder internally\.|Handle this internally\.|Do not relay it to the user unless explicitly requested\.|Please relay the command output to the user in a helpful way\.|Please relay this reminder to the user in a helpful and friendly way\.|Current time:)/i;
+const SYSTEM_EVENT_FOLLOWUP_LINE = /^(?:An async command you ran earlier has completed\.|A scheduled reminder has been triggered\.|A scheduled cron event was triggered(?:, but no event content was found)?\.|Handle this reminder internally\.|Handle this internally\.|Handle the result internally\.?|Do not relay it to the user unless explicitly requested\.|Please relay the command output to the user in a helpful way\.|Please relay this reminder to the user in a helpful and friendly way\.|Current time:)/i;
 
 /** Internal assistant control replies that should never render as chat bubbles. */
 const INTERNAL_CONTROL_REPLY_RE = /^(?:NO_REPLY|HEARTBEAT_OK)$/;
@@ -279,8 +279,11 @@ function splitSystemEvents(text: string): Array<{ role: 'event' | 'user'; text: 
       sawSystemEvent = true;
     } else {
       const trimmed = line.trim();
-      if (sawSystemEvent && (!trimmed || SYSTEM_EVENT_FOLLOWUP_LINE.test(trimmed))) {
-        continue;
+      if (sawSystemEvent) {
+        if (!trimmed || SYSTEM_EVENT_FOLLOWUP_LINE.test(trimmed)) {
+          continue;
+        }
+        sawSystemEvent = false;
       }
       userBuffer.push(line);
     }

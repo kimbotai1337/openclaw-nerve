@@ -184,6 +184,29 @@ describe('splitToolCallMessage', () => {
     expect(result[0].rawText).not.toContain('An async command you ran earlier has completed.');
     expect(result[0].rawText).not.toContain('Current time:');
   });
+
+  it('strips standalone follow-up lines like "Handle the result internally."', () => {
+    const msg: ChatMessage = {
+      role: 'user',
+      content: 'System (untrusted): [2026-04-16 18:11:51 GMT+3] Exec completed (gentle-l, code 0) :: done\nHandle the result internally.\nDo not relay it to the user unless explicitly requested.',
+    };
+    const result = splitToolCallMessage(msg);
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe('event');
+    expect(result[0].rawText).not.toContain('Handle the result internally.');
+  });
+
+  it('preserves later user text and paragraph breaks after a system event bundle', () => {
+    const msg: ChatMessage = {
+      role: 'user',
+      content: 'System (untrusted): [2026-04-16 18:11:51 GMT+3] Exec completed (gentle-l, code 0) :: done\n\nAn async command you ran earlier has completed.\nCurrent time: Thursday, April 16th, 2026 - 6:12 PM (Europe/Istanbul) / 2026-04-16 15:12 UTC\nHello there\n\nSecond paragraph',
+    };
+    const result = splitToolCallMessage(msg);
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe('event');
+    expect(result[1].role).toBe('user');
+    expect(result[1].rawText).toBe('Hello there\n\nSecond paragraph');
+  });
 });
 
 describe('groupToolMessages', () => {
