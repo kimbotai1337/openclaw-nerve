@@ -19,6 +19,8 @@ interface InlineSelectProps {
   triggerClassName?: string;
   menuClassName?: string;
   dropUp?: boolean;
+  /** Optional label override for the closed trigger button. */
+  displayLabel?: string;
   /** When true, render dropdown inline (absolute) instead of via portal.
    *  Use inside Radix Dialog or other portal-based overlays where
    *  a sibling portal's clicks get intercepted. */
@@ -42,6 +44,7 @@ export function InlineSelect({
   triggerClassName,
   menuClassName,
   dropUp = false,
+  displayLabel,
   inline = false,
 }: InlineSelectProps) {
   const [open, setOpen] = useState(false);
@@ -262,7 +265,7 @@ export function InlineSelect({
         onKeyDown={handleKeyDown}
         className={cn('font-mono text-[0.8rem] bg-background/40 text-foreground/80 border border-border/60 px-2 py-1.5 outline-none disabled:opacity-50 disabled:cursor-not-allowed inline-flex min-h-11 items-center gap-1 min-w-0 sm:min-h-8 sm:px-1.5 sm:py-0.5 sm:text-[0.667rem]', triggerClassName)}
       >
-        <span className="truncate">{selected?.label ?? value}</span>
+        <span className="truncate">{displayLabel ?? selected?.label ?? value}</span>
         <span className="text-muted-foreground">▾</span>
       </button>
 

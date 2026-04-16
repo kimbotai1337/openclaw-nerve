@@ -86,6 +86,9 @@ describe('useModelEffort', () => {
       if (url.startsWith('/api/gateway/session-info?sessionKey=')) {
         return Promise.resolve(jsonResponse({}));
       }
+      if (url.startsWith('/api/sessions/runtime?sessionKey=')) {
+        return Promise.resolve(jsonResponse({ ok: true, model: null, thinking: null, missing: true }));
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     }) as typeof globalThis.fetch;
   });
@@ -113,7 +116,7 @@ describe('useModelEffort', () => {
     ]);
   });
 
-  it('surfaces inherited defaults as primary + thinkingDefault for sessions on OpenClaw defaults', async () => {
+  it('keeps inherited effort selected while displaying the effective default value', async () => {
     mockUseGateway.mockReturnValue({
       rpc: vi.fn(),
       connectionState: 'connected',
@@ -151,6 +154,47 @@ describe('useModelEffort', () => {
     await waitFor(() => {
       expect(result.current.selectedModel).toBe('primary');
       expect(result.current.selectedEffort).toBe('thinkingDefault');
+      expect(result.current.selectedEffortLabel).toBe('medium');
+      expect(result.current.effortOptions[0]).toEqual({ value: 'thinkingDefault', label: 'medium (default)' });
+    });
+  });
+
+  it('uses transcript runtime defaults to label inherited effort when session summaries omit thinking', async () => {
+    mockUseGateway.mockReturnValue({
+      rpc: vi.fn(),
+      connectionState: 'connected',
+      model: 'zai/glm-4.7',
+      thinking: '--',
+    });
+
+    mockUseSessionContext.mockReturnValue({
+      currentSession: 'agent:smoke257:main',
+      sessions: [
+        { key: 'agent:smoke257:main', id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', model: 'zai/glm-4.7' },
+      ],
+      updateSession: vi.fn(),
+    });
+
+    globalThis.fetch = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/gateway/models') {
+        return Promise.resolve(jsonResponse({ models: CONFIGURED_MODELS, error: null }));
+      }
+      if (url === '/api/gateway/session-info?sessionKey=agent%3Asmoke257%3Amain') {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url === '/api/sessions/runtime?sessionKey=agent%3Asmoke257%3Amain') {
+        return Promise.resolve(jsonResponse({ ok: true, model: 'openai-codex/gpt-5.4', thinking: 'medium', missing: false }));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof globalThis.fetch;
+
+    const { result } = renderHook(() => useModelEffort());
+
+    await waitFor(() => {
+      expect(result.current.selectedEffort).toBe('thinkingDefault');
+      expect(result.current.selectedEffortLabel).toBe('medium');
+      expect(result.current.effortOptions[0]).toEqual({ value: 'thinkingDefault', label: 'medium (default)' });
     });
   });
 
@@ -169,6 +213,7 @@ describe('useModelEffort', () => {
     await waitFor(() => {
       expect(result.current.selectedModel).toBe('primary');
       expect(result.current.selectedEffort).toBe('high');
+      expect(result.current.selectedEffortLabel).toBe('high');
     });
   });
 });

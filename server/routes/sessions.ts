@@ -1,12 +1,12 @@
 /**
  * Sessions API Routes
  *
- * GET  /api/sessions/:id/model        — Read the actual model used in a session from its transcript.
+ * GET  /api/sessions/:id/model        — Read runtime defaults used in a session from its transcript.
  * POST /api/sessions/spawn-subagent   — Server-side subagent spawn with lifecycle ownership.
  *
- * The gateway's sessions.list returns the agent default model, not the model
- * actually used in a cron-run session (where payload.model overrides it).
- * This endpoint reads the session transcript to find the real model.
+ * The gateway's sessions.list can omit the actual model/thinking bootstrapped into
+ * a session, especially after reloads. This endpoint reads the session transcript
+ * to recover the model and initial thinking level.
  */
 
 import { Hono } from 'hono';
@@ -18,6 +18,7 @@ import { access, readdir, readFile } from 'node:fs/promises';
 import { config } from '../lib/config.js';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { spawnSubagent } from '../lib/subagent-spawn.js';
+import { normalizeAgentId } from '../lib/agent-workspace.js';
 
 const app = new Hono();
 const CRON_SESSION_RE = /^agent:[^:]+:cron:[^:]+(?::run:.+)?$/;
@@ -58,15 +59,29 @@ function inferParentSessionKey(sessionKey: string): string | null {
   return null;
 }
 
-async function loadSessionStore(): Promise<Record<string, StoredSessionSummary | undefined>> {
-  const sessionsFile = join(config.sessionsDir, 'sessions.json');
+async function loadSessionStoreFromDir(sessionsDir: string): Promise<Record<string, StoredSessionSummary | undefined>> {
+  const sessionsFile = join(sessionsDir, 'sessions.json');
   const raw = await readFile(sessionsFile, 'utf-8');
   return JSON.parse(raw) as Record<string, StoredSessionSummary | undefined>;
 }
 
+async function loadSessionStore(): Promise<Record<string, StoredSessionSummary | undefined>> {
+  return loadSessionStoreFromDir(config.sessionsDir);
+}
+
+function getAgentIdFromSessionKey(sessionKey: string): string {
+  const match = sessionKey.match(/^agent:([^:]+):/);
+  return match?.[1] || 'main';
+}
+
+function resolveSessionsDir(agentId?: string): string {
+  const normalized = normalizeAgentId(agentId);
+  if (normalized === 'main') return config.sessionsDir;
+  return join(config.home, '.openclaw', 'agents', normalized, 'sessions');
+}
+
 /** Resolve the transcript path for a session ID, checking both active and deleted files. */
-async function findTranscript(sessionId: string): Promise<string | null> {
-  const sessionsDir = config.sessionsDir;
+async function findTranscript(sessionId: string, sessionsDir = config.sessionsDir): Promise<string | null> {
   const activePath = join(sessionsDir, `${sessionId}.jsonl`);
 
   try {
@@ -83,20 +98,22 @@ async function findTranscript(sessionId: string): Promise<string | null> {
   }
 }
 
-/** Read the first N lines of a JSONL file to find a model_change entry. */
-async function readModelFromTranscript(filePath: string): Promise<string | null> {
+/** Read the first N lines of a JSONL file to recover runtime defaults near the top. */
+async function readRuntimeFromTranscript(filePath: string): Promise<{ model: string | null; thinking: string | null }> {
   return new Promise((resolve) => {
     const stream = createReadStream(filePath, { encoding: 'utf-8' });
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
     let lineCount = 0;
     let resolved = false;
+    let model: string | null = null;
+    let thinking: string | null = null;
 
-    const done = (result: string | null) => {
+    const done = () => {
       if (resolved) return;
       resolved = true;
       rl.close();
       stream.destroy();
-      resolve(result);
+      resolve({ model, thinking });
     };
 
     rl.on('line', (line) => {
@@ -104,20 +121,27 @@ async function readModelFromTranscript(filePath: string): Promise<string | null>
       lineCount++;
       try {
         const entry = JSON.parse(line);
-        if (entry.type === 'model_change' && entry.modelId) {
-          done(entry.modelId);
+        if (!model && entry.type === 'model_change' && entry.modelId) {
+          model = String(entry.modelId);
+        }
+        if (!thinking && entry.type === 'thinking_level_change' && entry.thinkingLevel) {
+          thinking = String(entry.thinkingLevel).toLowerCase();
+        }
+        if (model && thinking) {
+          done();
           return;
         }
       } catch { /* skip malformed lines */ }
 
-      // Only check first 10 lines — model_change is always near the top
-      if (lineCount >= 10) {
-        done(null);
+      // Runtime defaults are emitted near the top when present.
+      if (lineCount >= 20) {
+        done();
       }
     });
 
-    rl.on('close', () => done(null));
-    rl.on('error', () => done(null));
+    rl.on('close', () => done());
+    rl.on('error', () => done());
+    stream.on('error', () => done());
   });
 }
 
@@ -261,23 +285,59 @@ app.get('/api/sessions/hidden', rateLimitGeneral, async (c) => {
   }
 });
 
+app.get('/api/sessions/runtime', rateLimitGeneral, async (c) => {
+  const sessionKey = c.req.query('sessionKey')?.trim() || '';
+  if (!sessionKey) {
+    return c.json({ ok: false, error: 'sessionKey is required' }, 400);
+  }
+
+  const sessionsDir = resolveSessionsDir(getAgentIdFromSessionKey(sessionKey));
+  const store = await loadSessionStoreFromDir(sessionsDir).catch(() => ({} as Record<string, StoredSessionSummary | undefined>));
+  const session = store[sessionKey];
+  const storeThinking = session?.thinkingLevel || session?.thinking;
+  const info: { model: string | null; thinking: string | null; missing: boolean } = {
+    model: session?.model || null,
+    thinking: storeThinking ? String(storeThinking).toLowerCase() : null,
+    missing: false,
+  };
+
+  const sessionId = session?.sessionId;
+  if (!sessionId || !/^[0-9a-f-]{36}$/.test(sessionId)) {
+    return c.json({ ok: true, ...info, missing: true });
+  }
+
+  const transcriptPath = await findTranscript(sessionId, sessionsDir);
+  if (!transcriptPath) {
+    return c.json({ ok: true, ...info, missing: true });
+  }
+
+  const runtime = await readRuntimeFromTranscript(transcriptPath);
+  return c.json({
+    ok: true,
+    model: runtime.model ?? info.model,
+    thinking: runtime.thinking ?? info.thinking,
+    missing: false,
+  });
+});
+
 app.get('/api/sessions/:id/model', rateLimitGeneral, async (c) => {
   const sessionId = c.req.param('id');
+  const agentId = c.req.query('agentId')?.trim() || 'main';
 
   // Basic validation — session IDs are UUIDs
   if (!/^[0-9a-f-]{36}$/.test(sessionId)) {
     return c.json({ ok: false, error: 'Invalid session ID' }, 400);
   }
 
-  const transcriptPath = await findTranscript(sessionId);
+  const transcriptPath = await findTranscript(sessionId, resolveSessionsDir(agentId));
   if (!transcriptPath) {
     // Avoid 404 noise in the UI when hovering sessions that no longer have transcripts
     // (e.g. one-shot cron runs that were cleaned up).
-    return c.json({ ok: true, model: null, missing: true }, 200);
+    return c.json({ ok: true, model: null, thinking: null, missing: true }, 200);
   }
 
-  const modelId = await readModelFromTranscript(transcriptPath);
-  return c.json({ ok: true, model: modelId, missing: false });
+  const runtime = await readRuntimeFromTranscript(transcriptPath);
+  return c.json({ ok: true, model: runtime.model, thinking: runtime.thinking, missing: false });
 });
 
 // ── POST /api/sessions/spawn-subagent ────────────────────────────────

@@ -39,6 +39,13 @@ type EffortLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 type EffortSelection = typeof INHERITED_EFFORT_VALUE | EffortLevel;
 const EFFORT_OPTIONS: EffortLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
+function normalizeEffortLevel(raw: string | null | undefined): EffortLevel | null {
+  const normalized = raw?.toLowerCase();
+  return normalized && EFFORT_OPTIONS.includes(normalized as EffortLevel)
+    ? normalized as EffortLevel
+    : null;
+}
+
 export type GatewayModelInfo = {
   id: string;
   label: string;
@@ -138,6 +145,7 @@ export interface UseModelEffortReturn {
   effortOptions: { value: string; label: string }[];
   selectedModel: string;
   selectedEffort: string;
+  selectedEffortLabel: string;
   handleModelChange: (next: string) => Promise<void>;
   handleEffortChange: (next: string) => Promise<void>;
   controlsDisabled: boolean;
@@ -165,6 +173,7 @@ export function useModelEffort(): UseModelEffortReturn {
   // Keyed by session key → resolved model ID. Survives session switches so
   // we don't re-fetch when switching back to a previously visited session.
   const [resolvedSessionModels, setResolvedSessionModels] = useState<Record<string, string>>({});
+  const [resolvedSessionThinking, setResolvedSessionThinking] = useState<Record<string, EffortLevel>>({});
 
   const rawCurrentSessionModel = useMemo(() => {
     const cached = resolvedSessionModels[currentSession];
@@ -216,25 +225,31 @@ export function useModelEffort(): UseModelEffortReturn {
   const currentSessionThinking = useMemo(() => {
     const s = sessions.find(sess => getSessionKey(sess) === currentSession);
 
-    const explicit = s?.thinkingLevel?.toLowerCase();
-    if (explicit && EFFORT_OPTIONS.includes(explicit as EffortLevel)) {
-      return explicit as EffortLevel;
+    const explicit = normalizeEffortLevel(s?.thinkingLevel);
+    if (explicit) {
+      return explicit;
     }
 
-    const effective = s?.thinking?.toLowerCase();
-    const inheritedDefault = thinking?.toLowerCase();
-    if (
-      effective
-      && EFFORT_OPTIONS.includes(effective as EffortLevel)
-      && inheritedDefault
-      && EFFORT_OPTIONS.includes(inheritedDefault as EffortLevel)
-      && effective !== inheritedDefault
-    ) {
-      return effective as EffortLevel;
+    const effective = normalizeEffortLevel(s?.thinking);
+    const inheritedDefault = normalizeEffortLevel(thinking);
+    if (effective && inheritedDefault && effective !== inheritedDefault) {
+      return effective;
     }
 
     return null;
   }, [sessions, currentSession, thinking]);
+
+  const inheritedEffortLabel = useMemo<EffortSelection>(() => {
+    const s = sessions.find(sess => getSessionKey(sess) === currentSession);
+    return resolvedSessionThinking[currentSession]
+      || normalizeEffortLevel(s?.thinking)
+      || normalizeEffortLevel(thinking)
+      || INHERITED_EFFORT_VALUE;
+  }, [sessions, currentSession, thinking, resolvedSessionThinking]);
+
+  const selectedEffortLabel = selectedEffort === INHERITED_EFFORT_VALUE
+    ? inheritedEffortLabel
+    : selectedEffort;
 
   // Sync model dropdown when switching sessions (setState-during-render pattern)
   //
@@ -327,15 +342,37 @@ export function useModelEffort(): UseModelEffortReturn {
   useEffect(() => {
     const signal = { cancelled: false };
     (async () => {
-      if (signal.cancelled) return;
-
-      // For child sessions, resolve the actual model from cron payload or transcript
-      if (!currentSession) return;
-      const sessionType = getSessionType(currentSession);
-      if (sessionType === 'main') return;
+      if (signal.cancelled || !currentSession) return;
 
       let resolvedModel: string | null = null;
+      let resolvedThinking: EffortLevel | null = null;
 
+      try {
+        const info = await fetchGatewaySessionInfo(currentSession);
+        if (signal.cancelled) return;
+        resolvedThinking = normalizeEffortLevel(info?.thinking);
+      } catch (err) {
+        console.warn('[useModelEffort] Failed to fetch gateway session info:', err);
+      }
+
+      try {
+        const res = await fetch(`/api/sessions/runtime?sessionKey=${encodeURIComponent(currentSession)}`);
+        if (signal.cancelled) return;
+        const data = await res.json() as { ok: boolean; model?: string | null; thinking?: string | null; missing?: boolean };
+        if (data.ok) {
+          if (data.model != null) resolvedModel = data.model;
+          if (!resolvedThinking) resolvedThinking = normalizeEffortLevel(data.thinking);
+        }
+      } catch { /* ignore */ }
+
+      if (resolvedThinking && !signal.cancelled) {
+        setResolvedSessionThinking(prev => prev[currentSession] === resolvedThinking
+          ? prev
+          : { ...prev, [currentSession]: resolvedThinking });
+      }
+
+      // For child sessions, resolve the actual model from cron payload or transcript
+      const sessionType = getSessionType(currentSession);
       if (sessionType === 'cron') {
         // Cron parent: look up the job's payload.model
         const jobIdMatch = currentSession.match(/:cron:([^:]+)$/);
@@ -349,18 +386,6 @@ export function useModelEffort(): UseModelEffortReturn {
               const job = jobs.find((j: { id: string }) => j.id === jobIdMatch[1]);
               if (job?.payload?.model) resolvedModel = job.payload.model;
             }
-          } catch { /* ignore */ }
-        }
-      } else {
-        // Cron-run or subagent: read model from session transcript
-        const parts = currentSession.split(':');
-        const sessionId = parts[parts.length - 1];
-        if (sessionId && /^[0-9a-f-]{36}$/.test(sessionId)) {
-          try {
-            const res = await fetch(`/api/sessions/${sessionId}/model`);
-            if (signal.cancelled) return;
-            const data = await res.json() as { ok: boolean; model?: string | null; missing?: boolean };
-            if (data.ok && data.model != null) resolvedModel = data.model;
           } catch { /* ignore */ }
         }
       }
@@ -554,10 +579,15 @@ export function useModelEffort(): UseModelEffortReturn {
 
   const effortOptions = useMemo(
     () => [
-      { value: INHERITED_EFFORT_VALUE, label: INHERITED_EFFORT_VALUE },
+      {
+        value: INHERITED_EFFORT_VALUE,
+        label: inheritedEffortLabel === INHERITED_EFFORT_VALUE
+          ? 'default'
+          : `${inheritedEffortLabel} (default)`,
+      },
       ...EFFORT_OPTIONS.map((lvl) => ({ value: lvl, label: lvl })),
     ],
-    [],
+    [inheritedEffortLabel],
   );
 
   return {
@@ -565,6 +595,7 @@ export function useModelEffort(): UseModelEffortReturn {
     effortOptions,
     selectedModel,
     selectedEffort,
+    selectedEffortLabel,
     handleModelChange,
     handleEffortChange,
     controlsDisabled,

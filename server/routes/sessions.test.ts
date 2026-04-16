@@ -24,6 +24,7 @@ describe('sessions routes', () => {
     // Mock config to use our temp sessions dir
     vi.doMock('../lib/config.js', () => ({
       config: {
+        home: tmpDir,
         sessionsDir: tmpDir,
         auth: false,
         port: 3000,
@@ -62,15 +63,17 @@ describe('sessions routes', () => {
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.model).toBeNull();
+    expect(json.thinking).toBeNull();
     expect(json.missing).toBe(true);
   });
 
-  it('returns model from transcript with model_change entry', async () => {
+  it('returns runtime defaults from transcript entries near the top', async () => {
     const app = await buildApp();
     const uuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const transcript = [
       JSON.stringify({ type: 'session_start', ts: Date.now() }),
       JSON.stringify({ type: 'model_change', modelId: 'anthropic/claude-opus-4', ts: Date.now() }),
+      JSON.stringify({ type: 'thinking_level_change', thinkingLevel: 'medium', ts: Date.now() }),
       JSON.stringify({ type: 'message', role: 'user', content: 'hello' }),
     ].join('\n');
     await fs.writeFile(path.join(tmpDir, `${uuid}.jsonl`), transcript);
@@ -80,10 +83,11 @@ describe('sessions routes', () => {
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.model).toBe('anthropic/claude-opus-4');
+    expect(json.thinking).toBe('medium');
     expect(json.missing).toBe(false);
   });
 
-  it('returns model: null when transcript has no model_change', async () => {
+  it('returns model: null when transcript has no runtime defaults', async () => {
     const app = await buildApp();
     const uuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const transcript = [
@@ -97,6 +101,7 @@ describe('sessions routes', () => {
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.model).toBeNull();
+    expect(json.thinking).toBeNull();
     expect(json.missing).toBe(false);
   });
 
@@ -111,6 +116,49 @@ describe('sessions routes', () => {
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.model).toBe('openai/gpt-4o');
+    expect(json.thinking).toBeNull();
+    expect(json.missing).toBe(false);
+  });
+
+  it('reads non-main agent transcripts when agentId is provided', async () => {
+    const app = await buildApp();
+    const uuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const agentSessionsDir = path.join(tmpDir, '.openclaw', 'agents', 'smoke257', 'sessions');
+    await fs.mkdir(agentSessionsDir, { recursive: true });
+    await fs.writeFile(path.join(agentSessionsDir, `${uuid}.jsonl`), [
+      JSON.stringify({ type: 'model_change', modelId: 'openai-codex/gpt-5.4', ts: Date.now() }),
+      JSON.stringify({ type: 'thinking_level_change', thinkingLevel: 'medium', ts: Date.now() }),
+    ].join('\n'));
+
+    const res = await app.request(`/api/sessions/${uuid}/model?agentId=smoke257`);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.ok).toBe(true);
+    expect(json.model).toBe('openai-codex/gpt-5.4');
+    expect(json.thinking).toBe('medium');
+    expect(json.missing).toBe(false);
+  });
+
+  it('resolves runtime defaults by sessionKey for non-main agents', async () => {
+    const app = await buildApp();
+    const uuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const sessionKey = 'agent:smoke257:main';
+    const agentSessionsDir = path.join(tmpDir, '.openclaw', 'agents', 'smoke257', 'sessions');
+    await fs.mkdir(agentSessionsDir, { recursive: true });
+    await fs.writeFile(path.join(agentSessionsDir, 'sessions.json'), JSON.stringify({
+      [sessionKey]: { sessionId: uuid },
+    }));
+    await fs.writeFile(path.join(agentSessionsDir, `${uuid}.jsonl`), [
+      JSON.stringify({ type: 'model_change', modelId: 'openai-codex/gpt-5.4', ts: Date.now() }),
+      JSON.stringify({ type: 'thinking_level_change', thinkingLevel: 'medium', ts: Date.now() }),
+    ].join('\n'));
+
+    const res = await app.request(`/api/sessions/runtime?sessionKey=${encodeURIComponent(sessionKey)}`);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.ok).toBe(true);
+    expect(json.model).toBe('openai-codex/gpt-5.4');
+    expect(json.thinking).toBe('medium');
     expect(json.missing).toBe(false);
   });
 

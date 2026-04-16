@@ -36,6 +36,7 @@ export function ChatHeader({
     effortOptions,
     selectedModel,
     selectedEffort,
+    selectedEffortLabel,
     handleModelChange,
     handleEffortChange,
     controlsDisabled,
@@ -126,6 +127,7 @@ export function ChatHeader({
             title={controlsDisabled ? 'Connect to gateway to change effort' : undefined}
             triggerClassName="max-w-[82px] rounded-xl border-border/75 bg-background/65 px-2.5 py-1.5 text-[0.733rem] font-sans text-foreground sm:max-w-none sm:min-h-8 sm:px-2.5 sm:py-1"
             menuClassName="rounded-2xl border-border/80 bg-card/98 p-1 shadow-[0_20px_50px_rgba(0,0,0,0.28)]"
+            displayLabel={selectedEffortLabel}
             options={effortOptions}
           />
         </div>

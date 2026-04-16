@@ -25,6 +25,7 @@ const defaultMockHook = {
   ],
   selectedModel: 'gpt-4',
   selectedEffort: 'balanced',
+  selectedEffortLabel: 'Balanced',
   handleModelChange: vi.fn(),
   handleEffortChange: vi.fn(),
   controlsDisabled: false,
@@ -169,6 +170,30 @@ describe('ChatHeader', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Could not load configured models');
     expect(screen.getByRole('button', { name: 'Model' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('No configured models');
+  });
+
+  it('uses the effort display label when provided by the hook', () => {
+    const mockUseModelEffort = vi.mocked(useModelEffort);
+    mockUseModelEffort.mockReturnValue({
+      ...defaultMockHook,
+      selectedEffort: 'thinkingDefault',
+      selectedEffortLabel: 'medium',
+      effortOptions: [
+        { value: 'thinkingDefault', label: 'medium (default)' },
+        { value: 'medium', label: 'medium' },
+      ],
+    });
+
+    render(
+      <ChatHeader
+        onReset={mockOnReset}
+        onAbort={mockOnAbort}
+        isGenerating={false}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Effort' })).toHaveTextContent('medium');
+    expect(screen.getByRole('button', { name: 'Effort' })).not.toHaveTextContent('medium (default)');
   });
 
   it('shows abort button when generating', () => {
