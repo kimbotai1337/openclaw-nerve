@@ -243,7 +243,7 @@ Behavior by interactive profile:
   - patches gateway allowed origins using the tailnet IP origin
 - `Tailscale Serve`
   - keeps Nerve on `127.0.0.1`
-  - asks whether to run `tailscale serve --bg 443 http://127.0.0.1:<PORT>`
+  - asks whether to run `tailscale serve --bg http://127.0.0.1:<PORT>`
   - detects the resulting `https://<node>.tail<id>.ts.net` origin
   - patches both Nerve and the gateway for that `*.ts.net` origin
   - if Serve cannot be confirmed, asks whether to fall back to `tailnet IP` or stop

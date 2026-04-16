@@ -133,7 +133,7 @@ This keeps Nerve on localhost and lets Tailscale publish a private HTTPS URL.
 On the Nerve machine:
 
 ```bash
-tailscale serve --bg 443 http://127.0.0.1:3080
+tailscale serve --bg http://127.0.0.1:3080
 ```
 
 ### 2. Find the Serve URL
