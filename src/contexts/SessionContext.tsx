@@ -73,6 +73,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [agentStatus, setAgentStatus] = useState<Record<string, GranularAgentState>>({});
   const [agentName, setAgentName] = useState('Agent');
   const [defaultAgentWorkspaceRoot, setDefaultAgentWorkspaceRoot] = useState<string | null>(null);
+  const [rootIdentityNames, setRootIdentityNames] = useState<Record<string, string>>({});
+  const [rootIdentityMisses, setRootIdentityMisses] = useState<Record<string, true>>({});
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<Set<string>>(new Set());
   const unreadSessionKeysRef = useRef(unreadSessionKeys);
   const soundEnabledRef = useRef(soundEnabled);
