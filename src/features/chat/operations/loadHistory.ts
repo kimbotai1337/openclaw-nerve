@@ -183,8 +183,11 @@ export function filterMessage(m: ChatMessage): boolean {
  */
 // ─── System event splitting ────────────────────────────────────────────────────
 
-/** Matches "System: [2026-02-17 20:30:23 GMT+1] ..." lines injected by the gateway. */
-const SYSTEM_EVENT_LINE = /^System: \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]/;
+/** Matches timestamped gateway-injected system lines, including untrusted variants. */
+const SYSTEM_EVENT_LINE = /^System(?: \(untrusted\))?: \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]/;
+
+/** Internal follow-up lines appended after async exec/cron system events. */
+const SYSTEM_EVENT_FOLLOWUP_LINE = /^(?:An async command you ran earlier has completed\.|A scheduled reminder has been triggered\.|A scheduled cron event was triggered(?:, but no event content was found)?\.|Handle this reminder internally\.|Handle this internally\.|Do not relay it to the user unless explicitly requested\.|Please relay the command output to the user in a helpful way\.|Please relay this reminder to the user in a helpful and friendly way\.|Current time:)/i;
 
 /** Strip the TTS system prompt hint appended to voice messages by sendMessage. */
 const TTS_SYSTEM_HINT_RE = /\s*\[system: User sent a voice message\.[\s\S]*$/;
@@ -233,6 +236,7 @@ function extractUploadAttachments(rawText: string): {
 function splitSystemEvents(text: string): Array<{ role: 'event' | 'user'; text: string }> {
   const segments: Array<{ role: 'event' | 'user'; text: string }> = [];
   let userBuffer: string[] = [];
+  let sawSystemEvent = false;
 
   const flushUser = () => {
     const joined = userBuffer.join('\n').trim();
@@ -244,7 +248,12 @@ function splitSystemEvents(text: string): Array<{ role: 'event' | 'user'; text: 
     if (SYSTEM_EVENT_LINE.test(line)) {
       flushUser();
       segments.push({ role: 'event', text: stripAnsi(line) });
+      sawSystemEvent = true;
     } else {
+      const trimmed = line.trim();
+      if (sawSystemEvent && (!trimmed || SYSTEM_EVENT_FOLLOWUP_LINE.test(trimmed))) {
+        continue;
+      }
       userBuffer.push(line);
     }
   }
