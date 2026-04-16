@@ -45,7 +45,6 @@ function normalizeEffortLevel(raw: string | null | undefined): EffortLevel | nul
     ? normalized as EffortLevel
     : null;
 }
-
 export type GatewayModelInfo = {
   id: string;
   label: string;
