@@ -21,5 +21,8 @@ describe('chatPathLinks config', () => {
     expect(parseChatPathLinksConfig('{}')).toEqual({ prefixes: ['/workspace/'] });
     expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: [] }))).toEqual({ prefixes: ['/workspace/'] });
     expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: ['   '] }))).toEqual({ prefixes: ['/workspace/'] });
+    expect(parseChatPathLinksConfig(JSON.stringify({ prefixes: [123, null, false] }))).toEqual({
+      prefixes: ['/workspace/'],
+    });
   });
 });

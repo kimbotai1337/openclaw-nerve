@@ -180,7 +180,7 @@ function gatewayFilesToTree(
     }));
 }
 
-function normalizeWorkspaceLookupPath(input: string, workspaceRoot?: string): string {
+function normalizeWorkspaceLookupPath(input: string, workspaceRoots: string[] = []): string {
   const trimmed = input.trim();
   if (trimmed === '/workspace' || trimmed === '/workspace/') {
     return '.';
@@ -190,11 +190,11 @@ function normalizeWorkspaceLookupPath(input: string, workspaceRoot?: string): st
     return trimmed.slice('/workspace/'.length);
   }
 
-  const normalizedWorkspaceRoot = workspaceRoot
-    ? getWorkspaceRoot(workspaceRoot).split(path.sep).join('/').replace(/\/+$/, '')
-    : '';
+  const normalizedWorkspaceRoots = workspaceRoots
+    .map((root) => getWorkspaceRoot(root).split(path.sep).join('/').replace(/\/+$/, ''))
+    .filter((root, index, array) => Boolean(root) && array.indexOf(root) === index);
 
-  if (normalizedWorkspaceRoot) {
+  for (const normalizedWorkspaceRoot of normalizedWorkspaceRoots) {
     if (trimmed === normalizedWorkspaceRoot || trimmed === `${normalizedWorkspaceRoot}/`) {
       return '.';
     }
@@ -205,6 +205,12 @@ function normalizeWorkspaceLookupPath(input: string, workspaceRoot?: string): st
   }
 
   return trimmed;
+}
+
+async function getWorkspaceLookupRoots(workspaceRoot: string): Promise<string[]> {
+  const root = getWorkspaceRoot(workspaceRoot);
+  const realRoot = await fs.realpath(root).catch(() => root);
+  return realRoot === root ? [root] : [root, realRoot];
 }
 
 // ── GET /api/files/tree ──────────────────────────────────────────────
@@ -324,8 +330,9 @@ app.get('/api/files/resolve', async (c) => {
     return c.json({ ok: false, error: 'Not supported for remote workspaces', code: 'REMOTE_WORKSPACE' }, 501);
   }
 
+  const workspaceLookupRoots = await getWorkspaceLookupRoots(workspace.workspaceRoot);
   const rawTargetPath = targetPath.trim().replace(/\\/g, '/');
-  const normalizedTargetPath = normalizeWorkspaceLookupPath(rawTargetPath, workspace.workspaceRoot);
+  const normalizedTargetPath = normalizeWorkspaceLookupPath(rawTargetPath, workspaceLookupRoots);
   const workspaceRelativePath = (() => {
     if (!relativeTo) return normalizedTargetPath;
     if (normalizedTargetPath === '.') return '.';
@@ -334,7 +341,7 @@ app.get('/api/files/resolve', async (c) => {
 
     const normalizedRelativeTo = normalizeWorkspaceLookupPath(
       relativeTo.replace(/\\/g, '/'),
-      workspace.workspaceRoot,
+      workspaceLookupRoots,
     ).replace(/^\/+/, '');
     const relativeDir = path.posix.dirname(normalizedRelativeTo);
     return path.posix.normalize(path.posix.join(relativeDir === '.' ? '' : relativeDir, normalizedTargetPath));
