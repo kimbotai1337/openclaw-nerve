@@ -20,6 +20,18 @@ describe('filterMessage', () => {
     expect(filterMessage({ role: 'assistant', content: 'Hi there' })).toBe(true);
   });
 
+  it('hides exact internal assistant control replies', () => {
+    expect(filterMessage({ role: 'assistant', content: 'NO_REPLY' })).toBe(false);
+    expect(filterMessage({ role: 'assistant', content: '  HEARTBEAT_OK\n' })).toBe(false);
+  });
+
+  it('hides pure internal wake bundles', () => {
+    expect(filterMessage({
+      role: 'user',
+      content: 'System (untrusted): [2026-04-16 18:27:55 GMT+3] Exec completed (wild-orb, code 0) :: done\n\nAn async command you ran earlier has completed. The result is shown in the system messages above. Handle the result internally. Do not relay it to the user unless explicitly requested.\nCurrent time: Thursday, April 16th, 2026 - 6:29 PM (Europe/Istanbul) / 2026-04-16 15:29 UTC',
+    })).toBe(false);
+  });
+
   it('passes through sub-agent completions (tagged)', () => {
     expect(filterMessage({
       role: 'user',
@@ -275,6 +287,21 @@ describe('processChatMessages', () => {
     const sysMsg = result.find(m => m.rawText.includes('background task'));
     expect(sysMsg).toBeDefined();
     expect(sysMsg!.isSystemNotification).toBe(true);
+  });
+
+  it('drops internal wake bundles and silent control replies from rendered history', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'assistant', content: 'Already did it ⚡' },
+      {
+        role: 'user',
+        content: 'System (untrusted): [2026-04-16 18:27:55 GMT+3] Exec completed (wild-orb, code 0) :: done\nSystem (untrusted): [2026-04-16 18:28:54 GMT+3] Exec completed (rapid-sa, code 0) :: https://github.com/daggerhashimoto/openclaw-nerve/pull/278\n\nAn async command you ran earlier has completed. The result is shown in the system messages above. Handle the result internally. Do not relay it to the user unless explicitly requested.\nCurrent time: Thursday, April 16th, 2026 - 6:29 PM (Europe/Istanbul) / 2026-04-16 15:29 UTC',
+      },
+      { role: 'assistant', content: 'NO_REPLY' },
+    ];
+    const result = processChatMessages(msgs);
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe('assistant');
+    expect(result[0].rawText).toBe('Already did it ⚡');
   });
 
   it('handles empty input', () => {
