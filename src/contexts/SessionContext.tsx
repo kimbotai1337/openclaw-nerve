@@ -246,7 +246,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const identityName = rootId === 'main' ? agentName : rootIdentityNames[rootId];
     if (rootId !== 'main' && !identityName) {
       if (!session.identityName) return session;
-      const { identityName: _dropIdentity, ...rest } = session;
+      const rest = { ...session };
+      delete rest.identityName;
       return rest;
     }
     if (!identityName || session.identityName === identityName) return session;
