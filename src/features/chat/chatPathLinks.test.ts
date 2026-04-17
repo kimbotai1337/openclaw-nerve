@@ -53,6 +53,16 @@ describe('chatPathLinks config', () => {
     });
   });
 
+  it('rejects aliases that would shadow the built-in workspace shorthand', () => {
+    expect(normalizeChatPathLinkAliases({
+      'workspace/': '/workspace/override/',
+      'workspace/projects/': '/workspace/custom-projects/',
+      'docs/': '/workspace/docs/',
+    })).toEqual({
+      'docs/': '/workspace/docs/',
+    });
+  });
+
   it('serializes aliases with a trailing newline', () => {
     expect(stringifyChatPathLinksConfig({
       prefixes: ['/workspace', '/workspace/'],

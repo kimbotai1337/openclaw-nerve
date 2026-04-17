@@ -12,6 +12,7 @@ export interface ChatPathLinksSeedContext {
 
 const DEFAULT_PREFIX = '/workspace/';
 const CANONICAL_WORKSPACE_PREFIX = '/workspace/';
+const BARE_WORKSPACE_PREFIX = 'workspace/';
 const FILE_WORKSPACE_PREFIX = 'file:///workspace/';
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 
@@ -111,6 +112,8 @@ function normalizeAliasKey(value: string): string {
   const normalized = normalizePrefixPath(value);
   if (!normalized) return '';
   if (normalized.startsWith('/') || normalized.startsWith('file://') || SCHEME_RE.test(normalized)) return '';
+  // Reserve workspace/... for the built-in product shorthand, not user-defined aliases.
+  if (normalized.startsWith(BARE_WORKSPACE_PREFIX)) return '';
   return normalized;
 }
 
@@ -127,8 +130,8 @@ function normalizeAliasValue(value: string): string {
     return normalized;
   }
 
-  if (normalized.startsWith('workspace/')) {
-    return `${CANONICAL_WORKSPACE_PREFIX}${normalized.slice('workspace/'.length)}`;
+  if (normalized.startsWith(BARE_WORKSPACE_PREFIX)) {
+    return `${CANONICAL_WORKSPACE_PREFIX}${normalized.slice(BARE_WORKSPACE_PREFIX.length)}`;
   }
 
   return '';
