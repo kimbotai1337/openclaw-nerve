@@ -1248,23 +1248,23 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       />
       {/* Input row */}
       <div
-        className={`flex items-center gap-0 border-t shrink-0 bg-card focus-within:border-t-primary/40 focus-within:shadow-[0_-1px_8px_rgba(232,168,56,0.1)] ${voiceState === 'recording' ? 'border-t-red-500 shadow-[0_-1px_12px_rgba(239,68,68,0.3)]' : 'border-border'}`}
+        className={`flex items-start gap-0 border-t shrink-0 bg-card focus-within:border-t-primary/40 focus-within:shadow-[0_-1px_8px_rgba(232,168,56,0.1)] ${voiceState === 'recording' ? 'border-t-red-500 shadow-[0_-1px_12px_rgba(239,68,68,0.3)]' : 'border-border'}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
         {voiceState === 'recording' ? (
-          <span className="pl-3.5 shrink-0 flex items-center gap-1.5">
+          <span className="self-start pl-3.5 pt-3 shrink-0 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             <Mic size={14} className="text-red-500" />
           </span>
         ) : voiceState === 'transcribing' ? (
-          <span className="pl-3.5 shrink-0 flex items-center gap-1.5">
+          <span className="self-start pl-3.5 pt-3 shrink-0 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             <Mic size={14} className="text-primary" />
           </span>
         ) : (
-          <span className="text-primary text-base font-bold pl-3.5 shrink-0 animate-prompt-pulse">›</span>
+          <span className="self-start text-primary text-base leading-none font-bold pl-3.5 pt-3 shrink-0 animate-prompt-pulse">›</span>
         )}
         {/* Uncontrolled textarea — value is read/written via inputRef.
             This is intentional: useTabCompletion and history navigation
