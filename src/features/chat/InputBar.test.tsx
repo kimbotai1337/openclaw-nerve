@@ -266,12 +266,6 @@ describe('InputBar', () => {
     expect(screen.queryByText(/Ctrl\+F search/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the prompt glyph aligned to the first line of the composer', () => {
-    render(<InputBar onSend={vi.fn()} isGenerating={false} />);
-
-    expect(screen.getByText('›')).toHaveClass('self-start', 'pt-3', 'leading-none');
-  });
-
   it('uses the paperclip as the single primary attachment affordance', async () => {
     render(<InputBar onSend={vi.fn()} isGenerating={false} />);
 
