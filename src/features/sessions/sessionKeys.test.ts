@@ -121,4 +121,10 @@ describe('sessionKeys', () => {
     const child = session('agent:reviewer:subagent:child', { parentId: 'agent:missing:main' });
     expect(resolveParentSessionKey(child, knownKeys)).toBe('agent:reviewer:main');
   });
+
+  it('uses parentSessionKey when the gateway provides it', () => {
+    const knownKeys = new Set(['agent:main:main', 'custom-direct-key']);
+    const child = session('custom-direct-key', { parentSessionKey: 'agent:main:main' });
+    expect(resolveParentSessionKey(child, knownKeys)).toBe('agent:main:main');
+  });
 });

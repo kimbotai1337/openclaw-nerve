@@ -92,8 +92,14 @@ export function resolveParentSessionKey(session: Session, knownKeys?: Set<string
   const sessionKey = getSessionKey(session);
   if (!sessionKey) return null;
 
-  if (session.parentId) {
-    if (!knownKeys || knownKeys.has(session.parentId)) return session.parentId;
+  const explicitParent = typeof session.parentSessionKey === 'string' && session.parentSessionKey.trim()
+    ? session.parentSessionKey
+    : typeof session.parentId === 'string' && session.parentId.trim()
+      ? session.parentId
+      : null;
+
+  if (explicitParent) {
+    if (!knownKeys || knownKeys.has(explicitParent)) return explicitParent;
   }
 
   const inferred = inferParentSessionKey(sessionKey);

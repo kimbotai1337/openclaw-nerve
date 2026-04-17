@@ -585,6 +585,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             existing.thinkingLevel !== newSession.thinkingLevel ||
             existing.label !== newSession.label ||
             existing.displayName !== newSession.displayName ||
+            existing.parentSessionKey !== newSession.parentSessionKey ||
             existing.parentId !== newSession.parentId
           );
           
