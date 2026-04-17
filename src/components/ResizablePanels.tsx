@@ -58,6 +58,7 @@ export function ResizablePanels({
 
   useEffect(() => {
     if (!isDragging.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync from controlled prop in fixed-width mode
       setLocalRightWidth(rightWidthPx);
     }
   }, [rightWidthPx]);
