@@ -12,7 +12,7 @@ interface VersionCheck {
   current: string;
   latest: string | null;
   updateAvailable: boolean;
-  projectDir: string;
+  projectDir?: string | null;
 }
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -47,7 +47,7 @@ export function UpdateBadge() {
     return () => { ac.abort(); clearInterval(iv); };
   }, []);
 
-  if (!versionInfo?.updateAvailable || !versionInfo.latest) return null;
+  if (!versionInfo?.updateAvailable || !versionInfo.latest || !versionInfo.projectDir) return null;
 
   const quotedProjectDir = shellQuote(versionInfo.projectDir);
   const updateCommand = `cd ${quotedProjectDir} && npm run update -- --yes`;
