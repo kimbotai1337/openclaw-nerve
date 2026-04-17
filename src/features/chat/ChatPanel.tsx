@@ -50,6 +50,10 @@ interface ChatPanelProps {
   pathLinkAliases?: Record<string, string>;
   /** Open a dedicated bead viewer tab. */
   onOpenBeadId?: (target: BeadLinkTarget) => void | Promise<void>;
+  /** Whether to show the compact Commands launcher inside the composer. */
+  showCommandPaletteButton?: boolean;
+  /** Open the command palette from the compact composer launcher. */
+  onOpenCommandPalette?: () => void;
 }
 
 export interface ChatPanelHandle {
@@ -70,6 +74,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   pathLinkPrefixes,
   pathLinkAliases,
   onOpenBeadId,
+  showCommandPaletteButton = false,
+  onOpenCommandPalette,
 }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -393,6 +399,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         isGenerating={isGenerating}
         onWakeWordState={onWakeWordState}
         agentName={agentName}
+        showCommandPaletteButton={showCommandPaletteButton}
+        onOpenCommandPalette={onOpenCommandPalette}
       />
 
     </div>

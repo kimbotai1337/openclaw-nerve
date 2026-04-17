@@ -318,13 +318,19 @@ vi.mock('@/components/ConfirmDialog', () => ({
 }));
 
 vi.mock('@/features/chat/ChatPanel', () => ({
-  ChatPanel: forwardRef((_props: { onOpenBeadId?: (target: { beadId: string; workspaceAgentId?: string }) => void }, ref) => {
+  ChatPanel: forwardRef((props: {
+    onOpenBeadId?: (target: { beadId: string; workspaceAgentId?: string }) => void;
+    showCommandPaletteButton?: boolean;
+    onOpenCommandPalette?: () => void;
+  }, ref) => {
     useImperativeHandle(ref, () => ({
       focusInput: vi.fn(),
       addWorkspacePath: addWorkspacePathSpy,
     }));
 
-    return null;
+    return props.showCommandPaletteButton
+      ? <button type="button" data-testid="compact-command-trigger" aria-label="Open command palette" onClick={() => props.onOpenCommandPalette?.()}>Open Commands From Composer</button>
+      : null;
   }),
 }));
 
@@ -887,7 +893,7 @@ describe('App kanban visibility gating', () => {
     expect(screen.queryByRole('button', { name: 'Open Commands From TopBar' })).not.toBeInTheDocument();
   });
 
-  it('shows a mobile-only commands FAB above the composer in compact layout', () => {
+  it('shows a compact commands trigger inside the composer in compact layout', () => {
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -906,10 +912,9 @@ describe('App kanban visibility gating', () => {
 
     expect(screen.getByTestId('command-palette-state')).toHaveTextContent('closed');
 
-    const floatingButton = screen.getAllByRole('button', { name: /open command palette/i }).at(-1)!;
-    expect(floatingButton.className).toContain('bottom-40');
+    const compactButton = screen.getByTestId('compact-command-trigger');
 
-    fireEvent.click(floatingButton);
+    fireEvent.click(compactButton);
 
     expect(screen.getByTestId('command-palette-state')).toHaveTextContent('open');
   });

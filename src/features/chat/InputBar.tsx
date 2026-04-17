@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { Mic, Paperclip, X, Loader2, ArrowUp, FileText, FolderOpen } from 'lucide-react';
+import { Mic, Paperclip, X, Loader2, ArrowUp, FileText, FolderOpen, Command } from 'lucide-react';
 import type { TreeEntry } from '@/features/file-browser';
 import { useVoiceInput } from '@/features/voice/useVoiceInput';
 import { useTabCompletion } from '@/hooks/useTabCompletion';
@@ -40,6 +40,10 @@ interface InputBarProps {
   onWakeWordState?: (enabled: boolean, toggle: () => void) => void;
   /** Agent name for dynamic wake phrase (e.g., "Hey Helena") */
   agentName?: string;
+  /** Whether to show the compact command-palette launcher inside the composer. */
+  showCommandPaletteButton?: boolean;
+  /** Open the command palette from the compact composer launcher. */
+  onOpenCommandPalette?: () => void;
 }
 
 export interface InputBarHandle {
@@ -261,7 +265,14 @@ async function resolveWorkspacePathToCanonicalReference(
 }
 
 /** Chat input bar with file attachments, voice input, and model effort selector. */
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, isGenerating, onWakeWordState, agentName = 'Agent' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({
+  onSend,
+  isGenerating,
+  onWakeWordState,
+  agentName = 'Agent',
+  showCommandPaletteButton = false,
+  onOpenCommandPalette,
+}, ref) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deferredResizeFrameRef = useRef<number | null>(null);
@@ -1269,6 +1280,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           rows={1}
           className="flex-1 font-mono text-[13px] bg-transparent text-foreground border-none px-2.5 py-3 resize-none outline-none min-h-[42px] max-h-[160px]"
         />
+        {showCommandPaletteButton && onOpenCommandPalette && (
+          <button
+            type="button"
+            onClick={onOpenCommandPalette}
+            className="bg-transparent border-none text-muted-foreground hover:text-primary cursor-pointer px-2.5 self-stretch h-full flex items-center justify-center"
+            title="Open command palette"
+            aria-label="Open command palette"
+          >
+            <Command size={16} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           onClick={openUploadFilesPicker}

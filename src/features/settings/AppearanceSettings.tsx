@@ -230,13 +230,13 @@ export function AppearanceSettings() {
         />
       </div>
 
-      {/* Floating command palette visibility */}
+      {/* Compact command palette visibility */}
       <div className="cockpit-row items-start justify-between">
         <div className="flex items-center gap-3">
           <Command size={14} className={floatingCommandPaletteButtonVisible ? 'text-primary' : 'text-muted-foreground'} aria-hidden="true" />
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground" id="floating-commands-label">Show floating Commands button</span>
-            <span className="text-xs text-muted-foreground">Keep the compact-layout floating Commands launcher visible above the composer.</span>
+            <span className="text-sm font-medium text-foreground" id="floating-commands-label">Show compact Commands button</span>
+            <span className="text-xs text-muted-foreground">Keep the compact-layout Commands launcher anchored inside the composer.</span>
           </div>
         </div>
         <Switch
