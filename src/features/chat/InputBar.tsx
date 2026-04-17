@@ -1317,7 +1317,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             ? 'Recording… Left Shift to send · Double Left Shift to discard'
             : voiceState === 'transcribing'
             ? 'Transcribing…'
-            : 'Enter or ⌘Enter to send · Shift+Enter for newline · Double Left Shift for voice · Ctrl+F search'}
+            : 'Enter or ⌘Enter to send · Shift+Enter for newline · Double Left Shift for voice · ⌘K command palette'}
         </span>
       </div>
       {voiceError && (
