@@ -34,8 +34,7 @@ const {
 } = vi.hoisted(() => {
   const settingsContext = {
     kanbanVisible: true,
-    topBarCommandPaletteButtonVisible: true,
-    floatingCommandPaletteButtonVisible: true,
+    commandPaletteButtonVisible: true,
   };
   const uploadConfigState = {
     fileReferenceEnabled: true,
@@ -187,8 +186,7 @@ vi.mock('@/contexts/SettingsContext', () => ({
     setTheme: vi.fn(),
     setFont: vi.fn(),
     kanbanVisible: settingsContext.kanbanVisible,
-    topBarCommandPaletteButtonVisible: settingsContext.topBarCommandPaletteButtonVisible,
-    floatingCommandPaletteButtonVisible: settingsContext.floatingCommandPaletteButtonVisible,
+    commandPaletteButtonVisible: settingsContext.commandPaletteButtonVisible,
   }),
 }));
 
@@ -288,22 +286,15 @@ vi.mock('@/components/TopBar', () => ({
   TopBar: ({
     showKanbanView,
     viewMode,
-    onOpenCommandPalette,
-    showCommandPaletteButton = true,
   }: {
     showKanbanView?: boolean;
     viewMode?: string;
-    onOpenCommandPalette?: () => void;
-    showCommandPaletteButton?: boolean;
   }) => {
-    topBarRenderSnapshots.push({ showKanbanView, viewMode, showCommandPaletteButton } as { showKanbanView?: boolean; viewMode?: string; showCommandPaletteButton?: boolean });
+    topBarRenderSnapshots.push({ showKanbanView, viewMode } as { showKanbanView?: boolean; viewMode?: string });
     return (
       <div>
         <div data-testid="topbar-show-kanban">{String(showKanbanView ?? true)}</div>
         <div data-testid="topbar-view-mode">{viewMode ?? 'chat'}</div>
-        {showCommandPaletteButton && (
-          <button type="button" onClick={() => onOpenCommandPalette?.()}>Open Commands From TopBar</button>
-        )}
       </div>
     );
   },
@@ -329,7 +320,7 @@ vi.mock('@/features/chat/ChatPanel', () => ({
     }));
 
     return props.showCommandPaletteButton
-      ? <button type="button" data-testid="compact-command-trigger" aria-label="Open command palette" onClick={() => props.onOpenCommandPalette?.()}>Open Commands From Composer</button>
+      ? <button type="button" data-testid="chatbox-command-trigger" aria-label="Open command palette" onClick={() => props.onOpenCommandPalette?.()}>Open Commands From Composer</button>
       : null;
   }),
 }));
@@ -852,8 +843,7 @@ describe('App kanban visibility gating', () => {
   beforeEach(() => {
     localStorage.clear();
     settingsContext.kanbanVisible = true;
-    settingsContext.topBarCommandPaletteButtonVisible = true;
-    settingsContext.floatingCommandPaletteButtonVisible = true;
+    settingsContext.commandPaletteButtonVisible = true;
     topBarRenderSnapshots.length = 0;
   });
 
@@ -875,25 +865,17 @@ describe('App kanban visibility gating', () => {
     expect(screen.getByTestId('topbar-view-mode')).toHaveTextContent('chat');
   });
 
-  it('passes the top-bar command palette trigger through App state', () => {
+  it('opens the command palette from the chatbox trigger in desktop layout', () => {
     render(<App />);
 
     expect(screen.getByTestId('command-palette-state')).toHaveTextContent('closed');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Commands From TopBar' }));
+    fireEvent.click(screen.getByTestId('chatbox-command-trigger'));
 
     expect(screen.getByTestId('command-palette-state')).toHaveTextContent('open');
   });
 
-  it('hides the top-bar command palette trigger when the appearance toggle is disabled', () => {
-    settingsContext.topBarCommandPaletteButtonVisible = false;
-
-    render(<App />);
-
-    expect(screen.queryByRole('button', { name: 'Open Commands From TopBar' })).not.toBeInTheDocument();
-  });
-
-  it('shows a compact commands trigger inside the composer in compact layout', () => {
+  it('shows the chatbox command trigger in compact layout too', () => {
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -912,32 +894,17 @@ describe('App kanban visibility gating', () => {
 
     expect(screen.getByTestId('command-palette-state')).toHaveTextContent('closed');
 
-    const compactButton = screen.getByTestId('compact-command-trigger');
-
-    fireEvent.click(compactButton);
+    fireEvent.click(screen.getByTestId('chatbox-command-trigger'));
 
     expect(screen.getByTestId('command-palette-state')).toHaveTextContent('open');
   });
 
-  it('hides the mobile commands FAB when the appearance toggle is disabled', () => {
-    settingsContext.floatingCommandPaletteButtonVisible = false;
-    Object.defineProperty(window, 'matchMedia', {
-      writable: true,
-      value: vi.fn().mockImplementation((query: string) => ({
-        matches: query === '(max-width: 900px)',
-        media: query,
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    });
+  it('hides the chatbox command trigger when the appearance toggle is disabled', () => {
+    settingsContext.commandPaletteButtonVisible = false;
 
     render(<App />);
 
-    expect(screen.getByRole('button', { name: 'Open Commands From TopBar' })).toBeInTheDocument();
+    expect(screen.queryByTestId('chatbox-command-trigger')).not.toBeInTheDocument();
     expect(screen.queryAllByRole('button', { name: /open command palette/i })).toHaveLength(0);
   });
 });

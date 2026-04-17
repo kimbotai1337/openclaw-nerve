@@ -11,7 +11,6 @@ import {
 import {
   Activity,
   BarChart3,
-  Command,
   Settings,
   Radio,
   Users,
@@ -85,8 +84,6 @@ const PANEL_CONFIG: Record<Exclude<PanelId, null> | "default", PanelConfig> = {
 
 /** Props for {@link TopBar}. */
 interface TopBarProps {
-  /** Callback to open the command palette. */
-  onOpenCommandPalette: () => void;
   /** Callback to open the settings modal. */
   onSettings: () => void;
   /** Agent log entries rendered in the dropdown log panel. */
@@ -113,8 +110,6 @@ interface TopBarProps {
   onViewModeChange?: (mode: ViewMode) => void;
   /** Whether the Tasks/Kanban view toggle should be shown. */
   showKanbanView?: boolean;
-  /** Whether the top-bar Commands button should be shown. */
-  showCommandPaletteButton?: boolean;
 }
 
 /**
@@ -125,7 +120,6 @@ interface TopBarProps {
  * Workspace panels.
  */
 export function TopBar({
-  onOpenCommandPalette,
   onSettings,
   agentLogEntries,
   tokenData,
@@ -139,7 +133,6 @@ export function TopBar({
   viewMode = "chat",
   onViewModeChange,
   showKanbanView = true,
-  showCommandPaletteButton = true,
 }: TopBarProps) {
   const [activePanel, setActivePanel] = useState<PanelId>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -364,19 +357,6 @@ export function TopBar({
                   {eventEntries.length}
                 </span>
               )}
-            </button>
-          )}
-
-          {showCommandPaletteButton && (
-            <button
-              type="button"
-              onClick={onOpenCommandPalette}
-              title="Open command palette"
-              aria-label="Open command palette"
-              className={buttonBase}
-            >
-              <Command size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">Commands</span>
             </button>
           )}
 

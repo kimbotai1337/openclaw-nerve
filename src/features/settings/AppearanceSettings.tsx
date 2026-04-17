@@ -49,10 +49,8 @@ export function AppearanceSettings() {
     toggleLog,
     showHiddenWorkspaceEntries,
     toggleShowHiddenWorkspaceEntries,
-    topBarCommandPaletteButtonVisible,
-    toggleTopBarCommandPaletteButtonVisible,
-    floatingCommandPaletteButtonVisible,
-    toggleFloatingCommandPaletteButtonVisible,
+    commandPaletteButtonVisible,
+    toggleCommandPaletteButtonVisible,
     kanbanVisible,
     toggleKanbanVisible,
     theme,
@@ -214,35 +212,19 @@ export function AppearanceSettings() {
         />
       </div>
 
-      {/* Top bar command palette visibility */}
+      {/* Chatbox command palette visibility */}
       <div className="cockpit-row items-start justify-between">
         <div className="flex items-center gap-3">
-          <Command size={14} className={topBarCommandPaletteButtonVisible ? 'text-primary' : 'text-muted-foreground'} aria-hidden="true" />
+          <Command size={14} className={commandPaletteButtonVisible ? 'text-primary' : 'text-muted-foreground'} aria-hidden="true" />
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground" id="topbar-commands-label">Show top bar Commands button</span>
-            <span className="text-xs text-muted-foreground">Keep the Commands launcher visible in the top chrome.</span>
+            <span className="text-sm font-medium text-foreground" id="chatbox-commands-label">Show chatbox Commands button</span>
+            <span className="text-xs text-muted-foreground">Keep the Commands launcher visible in the chat composer.</span>
           </div>
         </div>
         <Switch
-          checked={topBarCommandPaletteButtonVisible}
-          onCheckedChange={toggleTopBarCommandPaletteButtonVisible}
-          aria-labelledby="topbar-commands-label"
-        />
-      </div>
-
-      {/* Compact command palette visibility */}
-      <div className="cockpit-row items-start justify-between">
-        <div className="flex items-center gap-3">
-          <Command size={14} className={floatingCommandPaletteButtonVisible ? 'text-primary' : 'text-muted-foreground'} aria-hidden="true" />
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground" id="floating-commands-label">Show compact Commands button</span>
-            <span className="text-xs text-muted-foreground">Keep the compact-layout Commands launcher anchored inside the composer.</span>
-          </div>
-        </div>
-        <Switch
-          checked={floatingCommandPaletteButtonVisible}
-          onCheckedChange={toggleFloatingCommandPaletteButtonVisible}
-          aria-labelledby="floating-commands-label"
+          checked={commandPaletteButtonVisible}
+          onCheckedChange={toggleCommandPaletteButtonVisible}
+          aria-labelledby="chatbox-commands-label"
         />
       </div>
 

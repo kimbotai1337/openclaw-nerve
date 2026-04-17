@@ -38,10 +38,8 @@ interface SettingsContextValue {
   toggleLog: () => void;
   showHiddenWorkspaceEntries: boolean;
   toggleShowHiddenWorkspaceEntries: () => void;
-  topBarCommandPaletteButtonVisible: boolean;
-  toggleTopBarCommandPaletteButtonVisible: () => void;
-  floatingCommandPaletteButtonVisible: boolean;
-  toggleFloatingCommandPaletteButtonVisible: () => void;
+  commandPaletteButtonVisible: boolean;
+  toggleCommandPaletteButtonVisible: () => void;
   theme: ThemeName;
   setTheme: (theme: ThemeName) => void;
   font: FontName;
@@ -57,6 +55,9 @@ interface SettingsContextValue {
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 const FONT_REFRESH_STORAGE_KEY = 'nerve:font-refresh-20260312';
 const KANBAN_VISIBILITY_STORAGE_KEY = 'nerve:workspace:kanban-visible';
+const COMMAND_PALETTE_BUTTON_STORAGE_KEY = 'nerve:showChatboxCommandPaletteButton';
+const LEGACY_TOPBAR_COMMAND_PALETTE_BUTTON_STORAGE_KEY = 'nerve:showTopBarCommandPaletteButton';
+const LEGACY_COMPACT_COMMAND_PALETTE_BUTTON_STORAGE_KEY = 'nerve:showFloatingCommandPaletteButton';
 
 const ALLOWED_FONT_SIZES = new Set([10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24]);
 const ALLOWED_EDITOR_FONT_SIZES = new Set([10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24]);
@@ -67,6 +68,19 @@ function normalizeFontSize(size: number): number {
 
 function normalizeEditorFontSize(size: number): number {
   return Number.isFinite(size) && ALLOWED_EDITOR_FONT_SIZES.has(size) ? size : 13;
+}
+
+function resolveInitialCommandPaletteButtonVisible(): boolean {
+  const saved = localStorage.getItem(COMMAND_PALETTE_BUTTON_STORAGE_KEY);
+  if (saved !== null) return saved !== 'false';
+
+  const legacyCompactSaved = localStorage.getItem(LEGACY_COMPACT_COMMAND_PALETTE_BUTTON_STORAGE_KEY);
+  if (legacyCompactSaved !== null) return legacyCompactSaved !== 'false';
+
+  const legacyTopbarSaved = localStorage.getItem(LEGACY_TOPBAR_COMMAND_PALETTE_BUTTON_STORAGE_KEY);
+  if (legacyTopbarSaved !== null) return legacyTopbarSaved !== 'false';
+
+  return true;
 }
 
 function resolveInitialFont(): FontName {
@@ -130,14 +144,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [showHiddenWorkspaceEntries, setShowHiddenWorkspaceEntries] = useState(() => {
     return localStorage.getItem('nerve:showHiddenWorkspaceEntries') === 'true';
   });
-  const [topBarCommandPaletteButtonVisible, setTopBarCommandPaletteButtonVisible] = useState(() => {
-    const saved = localStorage.getItem('nerve:showTopBarCommandPaletteButton');
-    return saved !== 'false';
-  });
-  const [floatingCommandPaletteButtonVisible, setFloatingCommandPaletteButtonVisible] = useState(() => {
-    const saved = localStorage.getItem('nerve:showFloatingCommandPaletteButton');
-    return saved !== 'false';
-  });
+  const [commandPaletteButtonVisible, setCommandPaletteButtonVisible] = useState(resolveInitialCommandPaletteButtonVisible);
   const [theme, setThemeState] = useState<ThemeName>(() => {
     const saved = localStorage.getItem('oc-theme') as ThemeName | null;
     return saved && themeNames.includes(saved) ? saved : 'ayu-dark';
@@ -320,18 +327,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const toggleTopBarCommandPaletteButtonVisible = useCallback(() => {
-    setTopBarCommandPaletteButtonVisible(prev => {
+  const toggleCommandPaletteButtonVisible = useCallback(() => {
+    setCommandPaletteButtonVisible(prev => {
       const next = !prev;
-      localStorage.setItem('nerve:showTopBarCommandPaletteButton', String(next));
-      return next;
-    });
-  }, []);
-
-  const toggleFloatingCommandPaletteButtonVisible = useCallback(() => {
-    setFloatingCommandPaletteButtonVisible(prev => {
-      const next = !prev;
-      localStorage.setItem('nerve:showFloatingCommandPaletteButton', String(next));
+      localStorage.setItem(COMMAND_PALETTE_BUTTON_STORAGE_KEY, String(next));
       return next;
     });
   }, []);
@@ -397,10 +396,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     toggleLog,
     showHiddenWorkspaceEntries,
     toggleShowHiddenWorkspaceEntries,
-    topBarCommandPaletteButtonVisible,
-    toggleTopBarCommandPaletteButtonVisible,
-    floatingCommandPaletteButtonVisible,
-    toggleFloatingCommandPaletteButtonVisible,
+    commandPaletteButtonVisible,
+    toggleCommandPaletteButtonVisible,
     theme,
     setTheme,
     font,
@@ -418,8 +415,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
     speak, panelRatio, setPanelRatio, telemetryVisible, toggleTelemetry,
     eventsVisible, toggleEvents, logVisible, toggleLog, showHiddenWorkspaceEntries, toggleShowHiddenWorkspaceEntries,
-    topBarCommandPaletteButtonVisible, toggleTopBarCommandPaletteButtonVisible,
-    floatingCommandPaletteButtonVisible, toggleFloatingCommandPaletteButtonVisible,
+    commandPaletteButtonVisible, toggleCommandPaletteButtonVisible,
     theme, setTheme, font, setFont,
     fontSize, setFontSize, editorFontSize, setEditorFontSize, kanbanVisible, toggleKanbanVisible,
   ]);

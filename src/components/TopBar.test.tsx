@@ -1,6 +1,5 @@
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { TopBar } from './TopBar';
 
@@ -11,7 +10,6 @@ vi.mock('./NerveLogo', () => ({
 function renderTopBar(props: Partial<React.ComponentProps<typeof TopBar>> = {}) {
   return render(
     <TopBar
-      onOpenCommandPalette={vi.fn()}
       onSettings={vi.fn()}
       agentLogEntries={[]}
       tokenData={null}
@@ -40,20 +38,8 @@ describe('TopBar', () => {
     expect(screen.getByRole('button', { name: /switch to chat view/i })).toBeInTheDocument();
   });
 
-  it('opens the command palette from the visible Commands trigger', async () => {
-    const user = userEvent.setup();
-    const onOpenCommandPalette = vi.fn();
-
-    renderTopBar({ onOpenCommandPalette });
-
-    await user.click(screen.getByRole('button', { name: /open command palette/i }));
-
-    expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: /open command palette/i })).toHaveTextContent(/commands/i);
-  });
-
-  it('hides the Commands trigger when explicitly disabled', () => {
-    renderTopBar({ onOpenCommandPalette: vi.fn(), showCommandPaletteButton: false });
+  it('does not render a top-bar Commands trigger', () => {
+    renderTopBar();
 
     expect(screen.queryByRole('button', { name: /open command palette/i })).not.toBeInTheDocument();
   });

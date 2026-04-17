@@ -125,8 +125,7 @@ export default function App({ onLogout }: AppProps) {
     toggleEvents, toggleLog, toggleTelemetry,
     setTheme, setFont,
     kanbanVisible,
-    topBarCommandPaletteButtonVisible,
-    floatingCommandPaletteButtonVisible,
+    commandPaletteButtonVisible,
   } = useSettings();
 
   // Connection management (extracted hook)
@@ -819,7 +818,7 @@ export default function App({ onLogout }: AppProps) {
             pathLinkPrefixes={chatPathLinkPrefixes}
             pathLinkAliases={chatPathLinkAliases}
             onOpenBeadId={openBeadId}
-            showCommandPaletteButton={isCompactLayout && floatingCommandPaletteButtonVisible && !paletteOpen && !settingsOpen && viewMode === 'chat'}
+            showCommandPaletteButton={commandPaletteButtonVisible && !paletteOpen && !settingsOpen && viewMode === 'chat'}
             onOpenCommandPalette={handleOpenPalette}
           />
         </PanelErrorBoundary>
@@ -974,7 +973,6 @@ export default function App({ onLogout }: AppProps) {
       
       {(!isCompactLayout || !isMobileTopBarHidden) && (
         <TopBar
-          onOpenCommandPalette={handleOpenPalette}
           onSettings={openSettings}
           agentLogEntries={agentLogEntries}
           tokenData={tokenData}
@@ -988,7 +986,6 @@ export default function App({ onLogout }: AppProps) {
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           showKanbanView={kanbanVisible}
-          showCommandPaletteButton={topBarCommandPaletteButtonVisible}
         />
       )}
 
