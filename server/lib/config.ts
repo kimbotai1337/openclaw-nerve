@@ -71,6 +71,13 @@ export const config = {
   gatewayToken: process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || '',
   publicOrigin: process.env.NERVE_PUBLIC_ORIGIN || '',
 
+  // Telemetry
+  telemetryModeRaw: process.env.NERVE_TELEMETRY_MODE || '',
+  telemetryDir: process.env.NERVE_TELEMETRY_DIR || path.join(HOME, '.nerve', 'telemetry'),
+  telemetryPhase1BaseUrl: 'https://telemetry.nerve.zone',
+  telemetryPhase2BaseUrl: 'https://analytics.nerve.zone',
+  telemetryPublicDocUrl: 'https://github.com/daggerhashimoto/openclaw-nerve/blob/master/docs/TELEMETRY.md',
+
   // Agent identity (used in UI)
   agentName: process.env.AGENT_NAME || 'Agent',
 

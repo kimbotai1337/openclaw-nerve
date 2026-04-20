@@ -41,6 +41,7 @@ GATEWAY_TOKEN=""
 GATEWAY_URL_OVERRIDE=""
 ACCESS_MODE=""
 ENV_MISSING=false
+IS_FRESH_INSTALL=false
 
 # ── Colors ────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -122,6 +123,36 @@ check_port() {
 repo_has_local_changes() {
   local repo_dir="$1"
   git -C "$repo_dir" status --porcelain --untracked-files=normal 2>/dev/null | grep -q .
+}
+
+stamp_telemetry() {
+  node scripts/lib/telemetry-stamp.mjs "$@"
+}
+
+write_env_with_writer() {
+  local gateway_url="$1"
+  local gateway_token="$2"
+  local nerve_port="$3"
+  local telemetry_mode="${4:-}"
+
+  NERVE_SETUP_GATEWAY_URL="$gateway_url" \
+  NERVE_SETUP_GATEWAY_TOKEN="$gateway_token" \
+  NERVE_SETUP_PORT="$nerve_port" \
+  NERVE_SETUP_TELEMETRY_MODE="$telemetry_mode" \
+  ./node_modules/.bin/tsx --eval '
+import { writeEnvFile } from "./scripts/lib/env-writer.ts";
+
+const config = {
+  GATEWAY_URL: process.env.NERVE_SETUP_GATEWAY_URL,
+  GATEWAY_TOKEN: process.env.NERVE_SETUP_GATEWAY_TOKEN,
+  PORT: process.env.NERVE_SETUP_PORT,
+  ...(process.env.NERVE_SETUP_TELEMETRY_MODE
+    ? { NERVE_TELEMETRY_MODE: process.env.NERVE_SETUP_TELEMETRY_MODE }
+    : {}),
+};
+
+writeEnvFile(".env", config);
+'
 }
 
 # Animated dots while a background process runs
@@ -686,6 +717,13 @@ else
   fi
 
   cd "$INSTALL_DIR"
+  if [[ ! -f .env ]]; then
+    IS_FRESH_INSTALL=true
+  fi
+  stamp_telemetry install-method release --source install.sh
+  if [[ "$IS_FRESH_INSTALL" == "true" ]]; then
+    stamp_telemetry bootstrap fresh_install --if-missing --source install.sh
+  fi
 fi
 
 # ── [3/5] Install & Build ────────────────────────────────────────────
@@ -905,11 +943,11 @@ generate_env_from_gateway() {
         done
       fi
     fi
-    cat > .env <<ENVEOF
-GATEWAY_URL=${gw_url}
-GATEWAY_TOKEN=${gw_token}
-PORT=${nerve_port}
-ENVEOF
+    local telemetry_mode=""
+    if [[ "$IS_FRESH_INSTALL" == "true" ]]; then
+      telemetry_mode="minimal"
+    fi
+    write_env_with_writer "$gw_url" "$gw_token" "$nerve_port" "$telemetry_mode"
     ok "Generated .env from OpenClaw gateway config"
   else
     warn "Cannot auto-generate .env — no gateway token found"
