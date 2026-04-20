@@ -1,6 +1,6 @@
 import type { Session } from '@/types';
 import { getSessionKey } from '@/types';
-import { getRootAgentSessionKey, getSessionType, isTopLevelAgentSessionKey, resolveParentSessionKey } from './sessionKeys';
+import { getExplicitParentCandidates, getRootAgentSessionKey, getSessionType, isTopLevelAgentSessionKey, resolveParentSessionKey } from './sessionKeys';
 
 export interface TreeNode {
   session: Session;
@@ -49,22 +49,9 @@ function hasAgentSidebarEligibleLineage(
   const parentKey = parentMap.get(sessionKey) ?? null;
   const session = sessionMap.get(sessionKey);
   const result = parentKey === null
-    ? (() => {
-        if (isAgentSidebarRootSessionKey(sessionKey)) return true;
-
-        const explicitParent = typeof session?.parentSessionKey === 'string' && session.parentSessionKey.trim()
-          ? session.parentSessionKey
-          : typeof session?.parentId === 'string' && session.parentId.trim()
-            ? session.parentId
-            : null;
-
-        if (explicitParent) {
-          if (isAgentSidebarRootSessionKey(explicitParent)) return true;
-          if (getRootAgentSessionKey(explicitParent)) return true;
-        }
-
-        return getRootAgentSessionKey(sessionKey) !== null;
-      })()
+    ? isAgentSidebarRootSessionKey(sessionKey)
+      || getExplicitParentCandidates(session).some((explicitParent) => getRootAgentSessionKey(explicitParent) !== null)
+      || getRootAgentSessionKey(sessionKey) !== null
     : parentMap.has(parentKey) && hasAgentSidebarEligibleLineage(parentKey, parentMap, sessionMap, memo, visiting);
 
   visiting.delete(sessionKey);

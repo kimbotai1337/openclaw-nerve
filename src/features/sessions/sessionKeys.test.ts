@@ -127,4 +127,13 @@ describe('sessionKeys', () => {
     const child = session('custom-direct-key', { parentSessionKey: 'agent:main:main' });
     expect(resolveParentSessionKey(child, knownKeys)).toBe('agent:main:main');
   });
+
+  it('falls back to parentId when parentSessionKey is stale', () => {
+    const knownKeys = new Set(['agent:main:main', 'custom-direct-key']);
+    const child = session('custom-direct-key', {
+      parentSessionKey: 'stale-parent-key',
+      parentId: ' agent:main:main ',
+    });
+    expect(resolveParentSessionKey(child, knownKeys)).toBe('agent:main:main');
+  });
 });

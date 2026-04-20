@@ -256,6 +256,28 @@ describe('buildAgentSidebarTree', () => {
     ]);
   });
 
+  it('falls back to parentId when parentSessionKey is stale and still keeps the orphan chain visible', () => {
+    const sessions = [
+      session('custom-cron-key', {
+        parentSessionKey: 'stale-parent-key',
+        parentId: ' agent:main:main ',
+        label: 'Explicit Cron',
+      }),
+      session('custom-cron-run-key', {
+        parentSessionKey: 'custom-cron-key',
+        label: 'Explicit Run',
+      }),
+      session('discord:sean', { label: 'Discord Root' }),
+    ];
+
+    const tree = buildAgentSidebarTree(sessions);
+    const flat = flattenTree(tree, {});
+    expect(flat.map((node) => node.key)).toEqual([
+      'custom-cron-key',
+      'custom-cron-run-key',
+    ]);
+  });
+
   it('nests direct and channel delivery sessions under their agent root', () => {
     const sessions = [
       session('agent:reviewer:main', { label: 'Reviewer' }),
