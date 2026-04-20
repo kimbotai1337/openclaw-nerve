@@ -43,7 +43,18 @@ Server config is the only control surface.
 
 - Fresh installs default to `minimal`.
 - Upgrades preserve existing behavior and do not silently enable telemetry.
+- If an upgraded install has no existing telemetry setting because it predates this feature, Nerve treats that state as `off` until an admin explicitly configures telemetry.
 - `detailed` is always explicit opt-in.
+
+This behavior must be driven by a deterministic bootstrap marker, not inference.
+
+Required contract:
+
+- fresh install flows must write a local telemetry bootstrap marker declaring `fresh_install`
+- the first release that introduces telemetry must write a local bootstrap marker declaring `upgrade_legacy` when it detects an existing install with no telemetry setting
+- if no explicit telemetry mode exists and no trusted fresh-install marker is present, Nerve must fail safe to `off`
+
+This prevents silent enablement on upgraded pre-telemetry installs.
 
 ### Install Channels
 
@@ -171,6 +182,21 @@ Phase 1 tracks these coarse feature booleans:
 - `kanban`
 - `settings`
 
+Boolean semantics:
+
+- each boolean starts `false` for a new trailing 24-hour window
+- a boolean flips to `true` when at least one qualifying action for that product area occurs within the active window
+- qualifying actions must be defined by Nerve-owned instrumentation rules, not custom user data
+- once `true`, a boolean stays `true` until the window rolls forward and the local aggregate store recomputes the next trailing 24-hour snapshot
+
+Initial qualifying actions:
+
+- `chat`: at least one message submitted or assistant response appended in chat
+- `sessions`: at least one session created, opened, renamed, or deleted
+- `branches`: at least one branch switch or branch creation action
+- `kanban`: at least one Kanban task create, move, or complete action
+- `settings`: at least one settings save action
+
 These values are aggregate only. No event stream or content history is preserved locally for telemetry purposes.
 
 ### Heartbeat Schedule
@@ -180,6 +206,22 @@ Nerve sends a heartbeat:
 - shortly after first boot or first-seen initialization
 - once every 24 hours with jitter
 - once after an app-version change is detected
+
+All Phase 1 heartbeats are snapshot records, not deltas.
+
+Required semantics:
+
+- `counts_24h` and `features_used_24h` always describe the trailing 24-hour window ending at `sent_at`
+- heartbeat payloads must include a machine-readable reason such as `first_seen`, `daily`, or `version_change`
+- only heartbeats with `reason = daily` are eligible to feed daily usage rollups for `counts_24h` and `features_used_24h`
+- `first_seen` and `version_change` heartbeats are operational snapshots for install discovery and version-observation only; they do not add usage volume to daily aggregate reporting
+- if multiple `daily` heartbeats exist for the same `instance_id` on the same UTC day, the latest accepted `daily` heartbeat wins for that day and earlier same-day `daily` heartbeats are ignored in rollups
+- the collector must never sum overlapping trailing windows from the same `instance_id`
+
+Reporting interpretation:
+
+- install-activity dashboards may count any accepted heartbeat for presence and last-seen purposes
+- usage-volume dashboards must use only canonical `daily` snapshots after same-day deduplication
 
 Telemetry sending is best effort:
 
@@ -198,7 +240,10 @@ Required payload shape:
   "instance_id": "uuid",
   "app_version": "1.5.2",
   "install_method": "release",
+  "reason": "daily",
   "sent_at": "2026-04-20T20:00:00Z",
+  "window_start": "2026-04-19T20:00:00Z",
+  "window_end": "2026-04-20T20:00:00Z",
   "active_24h": true,
   "counts_24h": {
     "sessions_created": 8,
@@ -363,6 +408,7 @@ Example payload:
 
 ```json
 {
+  "schema_version": 1,
   "event": "tool_call_completed",
   "instance_id": "uuid",
   "app_version": "1.5.2",
@@ -385,7 +431,20 @@ Allowed initial properties:
 - `duration_bucket`
 - `feature_area`
 
-Unknown properties are rejected.
+All Phase 2 property values must come from bounded enums or coarse buckets owned by Nerve. Raw freeform values are not allowed.
+
+Initial value rules:
+
+- `surface` must be one of: `chat`, `sessions`, `kanban`, `workspace`, `settings`
+- `tool_name` must be one of the fixed coarse telemetry families: `read`, `write`, `edit`, `exec`, `browser`, `web`, `message`, `memory`, `image`, `video`, `pdf`, `session_ops`, `other`
+- raw custom tool names, MCP tool names, and user-defined identifiers must never leave the box
+- unknown or unmapped tools must be coerced to `other`
+- `success` must be boolean
+- `duration_bucket` must be one of: `lt_1s`, `1_5s`, `5_30s`, `gt_30s`
+- `feature_area` must be one of: `chat`, `sessions`, `kanban`, `workspace`, `settings`
+
+Unknown properties are rejected by Nerve before forwarding and rejected again by the analytics relay if they somehow reach it.
+Unknown property values or out-of-taxonomy values are also rejected unless the contract explicitly says they are coerced to a named coarse fallback.
 
 ### Initial Phase 2 Event Set
 
@@ -410,7 +469,18 @@ This keeps the first detailed analytics slice focused on core usage plus differe
 - self-hosted PostHog behind the relay
 - internal dashboards for maintainers
 
-The relay is responsible for schema validation, request-size enforcement, and dropping unknown properties before forwarding data into PostHog.
+Required Phase 2 API surface:
+
+- `POST /v1/events`
+- `GET /healthz`
+
+The relay is responsible for schema validation, request-size enforcement, and rejecting payloads that contain unknown properties before forwarding data into PostHog.
+
+Recommended Phase 2 retention policy:
+
+- raw accepted relay payloads: 30 days
+- PostHog detailed events: 90 days
+- aggregate dashboards or rollups derived from them: 12 months or longer
 
 ## Control Surface and UX
 
@@ -493,7 +563,7 @@ Wire Nerve to send:
 
 ### Milestone 4: Observation Window
 
-Run Phase 1 alone for a period before enabling Phase 2 by default in any environment. Use this window to validate the trust story, payload hygiene, and practical usefulness of the aggregate data.
+Run Phase 1 alone for a period before rolling out Phase 2 to explicitly opted-in `detailed` environments. Use this window to validate the trust story, payload hygiene, and practical usefulness of the aggregate data.
 
 ### Milestone 5: Phase 2
 
@@ -537,6 +607,7 @@ Required manual checks:
 
 - fresh release install defaults to `minimal`
 - fresh source install defaults to `minimal`
+- upgraded installs with no prior telemetry setting stay `off` until explicitly configured
 - upgrades do not silently enable telemetry
 - first-run notice appears with accurate disclosure
 - disabling telemetry via server config works as documented
