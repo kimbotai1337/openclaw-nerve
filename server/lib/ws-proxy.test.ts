@@ -904,7 +904,7 @@ describe('ws-proxy', () => {
 
       expect(telemetryRuntimeMock.recordSessionCreated).toHaveBeenCalledWith(expect.objectContaining({
         sessionKey: 'agent:main:main',
-        surface: 'chat',
+        surface: 'sessions',
         explicit: false,
       }));
 

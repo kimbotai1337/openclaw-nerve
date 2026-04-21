@@ -19,6 +19,7 @@ export const DETAILED_TOOL_FAMILIES = [
 export const TOOL_DURATION_BUCKETS = ['lt_1s', '1_5s', '5_30s', 'gt_30s'] as const;
 
 export type DetailedEventSurface = (typeof DETAILED_EVENT_SURFACES)[number];
+export type DetailedFeatureArea = DetailedEventSurface;
 export type DetailedToolFamily = (typeof DETAILED_TOOL_FAMILIES)[number];
 export type ToolDurationBucket = (typeof TOOL_DURATION_BUCKETS)[number];
 export type DetailedEventName = 'session_created' | 'message_submitted' | 'tool_call_completed';
@@ -39,6 +40,7 @@ export interface SessionCreatedEventPayload {
   sent_at: string;
   properties: {
     surface: DetailedEventSurface;
+    feature_area: DetailedFeatureArea;
   };
 }
 
@@ -51,6 +53,7 @@ export interface MessageSubmittedEventPayload {
   sent_at: string;
   properties: {
     surface: DetailedEventSurface;
+    feature_area: DetailedFeatureArea;
   };
 }
 
@@ -63,6 +66,7 @@ export interface ToolCallCompletedEventPayload {
   sent_at: string;
   properties: {
     surface: DetailedEventSurface;
+    feature_area: DetailedFeatureArea;
     tool_name: DetailedToolFamily;
     success: boolean;
     duration_bucket: ToolDurationBucket;
@@ -85,6 +89,17 @@ function normalizeSurface(value: string | undefined, fallback: DetailedEventSurf
     return value as DetailedEventSurface;
   }
   return fallback;
+}
+
+function buildSurfaceProperties(
+  surface: string | undefined,
+  fallback: DetailedEventSurface,
+): { surface: DetailedEventSurface; feature_area: DetailedFeatureArea } {
+  const normalizedSurface = normalizeSurface(surface, fallback);
+  return {
+    surface: normalizedSurface,
+    feature_area: normalizedSurface,
+  };
 }
 
 function buildDetailedEvent<TEvent extends DetailedEventName, TProperties extends Record<string, unknown>>(
@@ -147,17 +162,13 @@ export function bucketDurationMs(durationMs: number): ToolDurationBucket {
 export function buildSessionCreatedEvent(
   params: DetailedEventBaseParams & { surface: DetailedEventSurface | string },
 ): SessionCreatedEventPayload {
-  return buildDetailedEvent(params, 'session_created', {
-    surface: normalizeSurface(params.surface, 'sessions'),
-  });
+  return buildDetailedEvent(params, 'session_created', buildSurfaceProperties(params.surface, 'sessions'));
 }
 
 export function buildMessageSubmittedEvent(
   params: DetailedEventBaseParams & { surface: DetailedEventSurface | string },
 ): MessageSubmittedEventPayload {
-  return buildDetailedEvent(params, 'message_submitted', {
-    surface: normalizeSurface(params.surface, 'chat'),
-  });
+  return buildDetailedEvent(params, 'message_submitted', buildSurfaceProperties(params.surface, 'chat'));
 }
 
 export function buildToolCallCompletedEvent(
@@ -170,7 +181,7 @@ export function buildToolCallCompletedEvent(
   },
 ): ToolCallCompletedEventPayload {
   return buildDetailedEvent(params, 'tool_call_completed', {
-    surface: normalizeSurface(params.surface, 'chat'),
+    ...buildSurfaceProperties(params.surface, 'chat'),
     tool_name: coerceToolFamily(params.toolName),
     success: !!params.success,
     duration_bucket: bucketDurationMs(params.finishedAt - params.startedAt),

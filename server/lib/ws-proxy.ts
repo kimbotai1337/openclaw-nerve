@@ -277,7 +277,7 @@ function createGatewayRelay(
 
       await telemetry.recordSessionCreated({
         sessionKey,
-        surface: 'chat',
+        surface: 'sessions',
         explicit: false,
         occurredAt: request.sentAt,
       });

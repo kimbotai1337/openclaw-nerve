@@ -26,6 +26,7 @@ describe('telemetry detailed event helpers', () => {
     expect(payload.event).toBe('tool_call_completed');
     expect(payload.properties).toEqual({
       surface: 'chat',
+      feature_area: 'chat',
       tool_name: 'web',
       success: true,
       duration_bucket: '1_5s',
@@ -56,7 +57,7 @@ describe('telemetry detailed event helpers', () => {
       sentAt: '2026-04-21T00:05:01.000Z',
     });
 
-    expect(sessionCreated.properties).toEqual({ surface: 'sessions' });
-    expect(messageSubmitted.properties).toEqual({ surface: 'chat' });
+    expect(sessionCreated.properties).toEqual({ surface: 'sessions', feature_area: 'sessions' });
+    expect(messageSubmitted.properties).toEqual({ surface: 'chat', feature_area: 'chat' });
   });
 });
