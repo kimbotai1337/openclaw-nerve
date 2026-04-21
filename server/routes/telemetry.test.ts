@@ -106,7 +106,7 @@ describe('telemetry relay routes', () => {
     expect(telemetryRuntimeMock.recordClientDetailedEvent).not.toHaveBeenCalled();
   });
 
-  it('relays branch_switched through the telemetry runtime', async () => {
+  it('marks branches and relays branch_switched through the telemetry runtime', async () => {
     mockDeps();
     const app = await buildApp();
 
@@ -119,7 +119,28 @@ describe('telemetry relay routes', () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(telemetryRuntimeMock.markFeatureUsed).not.toHaveBeenCalled();
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('branches');
+    expect(telemetryRuntimeMock.recordClientDetailedEvent).toHaveBeenCalledTimes(1);
+    expect(telemetryRuntimeMock.recordClientDetailedEvent).toHaveBeenCalledWith(payload);
+  });
+
+  it('keeps branch_switched best-effort when feature marking fails', async () => {
+    mockDeps();
+    telemetryRuntimeMock.markFeatureUsed.mockRejectedValueOnce(new Error('boom'));
+    const app = await buildApp();
+
+    const payload = { event: 'branch_switched', properties: { success: true } };
+    const res = await app.request('/api/telemetry/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('branches');
     expect(telemetryRuntimeMock.recordClientDetailedEvent).toHaveBeenCalledTimes(1);
     expect(telemetryRuntimeMock.recordClientDetailedEvent).toHaveBeenCalledWith(payload);
   });

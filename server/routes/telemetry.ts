@@ -41,6 +41,14 @@ async function recordUiTelemetryEvent(payload: z.infer<typeof uiTelemetryEventSc
       return;
     }
 
+    if (payload.event === 'branch_switched') {
+      await Promise.allSettled([
+        telemetry.markFeatureUsed('branches'),
+        telemetry.recordClientDetailedEvent(payload),
+      ]);
+      return;
+    }
+
     await telemetry.recordClientDetailedEvent(payload);
   } catch {
     return;
