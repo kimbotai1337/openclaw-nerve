@@ -148,7 +148,11 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         snapshot,
       });
 
-      await transport.postJson('/v1/heartbeat', payload);
+      const delivered = await transport.postJson('/v1/heartbeat', payload);
+      if (!delivered) {
+        return;
+      }
+
       await store.noteHeartbeatSent({
         reason,
         sentAt: payload.sent_at,

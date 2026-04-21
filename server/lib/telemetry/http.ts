@@ -1,5 +1,5 @@
 export interface TelemetryTransport {
-  postJson(path: string, body: unknown): Promise<void>;
+  postJson(path: string, body: unknown): Promise<boolean>;
 }
 
 export interface TelemetryHttpTransportOptions {
@@ -30,7 +30,7 @@ export function createTelemetryHttpTransport(options: TelemetryHttpTransportOpti
       try {
         const serialized = JSON.stringify(body);
         if (Buffer.byteLength(serialized, 'utf8') > maxRequestBytes) {
-          return;
+          return false;
         }
 
         const url = new URL(path, baseUrl).toString();
@@ -45,21 +45,23 @@ export function createTelemetryHttpTransport(options: TelemetryHttpTransportOpti
             });
 
             if (response.ok) {
-              return;
+              return true;
             }
 
             if (!shouldRetry(response.status) || attempt === maxRetries) {
-              return;
+              return false;
             }
           } catch {
             if (attempt === maxRetries) {
-              return;
+              return false;
             }
           }
         }
       } catch {
-        return;
+        return false;
       }
+
+      return false;
     },
   };
 }

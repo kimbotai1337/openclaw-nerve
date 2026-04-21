@@ -131,7 +131,7 @@ describe('telemetry runtime', () => {
   it('gates transport by telemetry mode', async () => {
     for (const mode of ['off', 'minimal', 'detailed'] as const) {
       const { store, snapshot } = createMemoryStore();
-      const postJson = vi.fn().mockResolvedValue(undefined);
+      const postJson = vi.fn().mockResolvedValue(true);
       const scheduler = createScheduler();
       const runtime = createTelemetryRuntime({
         appVersion: '1.5.2',
@@ -184,7 +184,7 @@ describe('telemetry runtime', () => {
     snapshot.lastHeartbeatSentAtByReason.first_seen = '2026-04-20T00:00:00.000Z';
     snapshot.lastHeartbeatAppVersion = '1.5.1';
 
-    const postJson = vi.fn().mockResolvedValue(undefined);
+    const postJson = vi.fn().mockResolvedValue(true);
     const runtime = createTelemetryRuntime({
       appVersion: '1.5.2',
       envMode: 'minimal',
@@ -206,12 +206,60 @@ describe('telemetry runtime', () => {
     await runtime.stop();
   });
 
+  it('retries startup heartbeats until delivery is confirmed', async () => {
+    const { store, snapshot } = createMemoryStore();
+
+    const failedDelivery = vi.fn().mockResolvedValue(false);
+    const firstRuntime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: 'minimal',
+      store,
+      transport: { postJson: failedDelivery },
+      metadata: createMetadata('minimal', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T00:05:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await firstRuntime.start();
+    await flushAsyncWork();
+
+    expect(failedDelivery).toHaveBeenCalledTimes(1);
+    expect(failedDelivery.mock.calls[0]?.[1]).toMatchObject({ reason: 'first_seen' });
+    expect(snapshot.lastHeartbeatSentAtByReason.first_seen).toBeUndefined();
+    expect(snapshot.lastHeartbeatAppVersion).toBeUndefined();
+
+    await firstRuntime.stop();
+
+    const confirmedDelivery = vi.fn().mockResolvedValue(true);
+    const secondRuntime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: 'minimal',
+      store,
+      transport: { postJson: confirmedDelivery },
+      metadata: createMetadata('minimal', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T00:05:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await secondRuntime.start();
+    await flushAsyncWork();
+
+    expect(confirmedDelivery).toHaveBeenCalledTimes(1);
+    expect(confirmedDelivery.mock.calls[0]?.[1]).toMatchObject({ reason: 'first_seen' });
+    expect(snapshot.lastHeartbeatSentAtByReason.first_seen).toBe('2026-04-21T00:05:00.000Z');
+    expect(snapshot.lastHeartbeatAppVersion).toBe('1.5.2');
+
+    await secondRuntime.stop();
+  });
+
   it('schedules daily heartbeats and clears the timer on stop', async () => {
     const { store, snapshot } = createMemoryStore();
     snapshot.lastHeartbeatSentAtByReason.first_seen = '2026-04-20T00:00:00.000Z';
     snapshot.lastHeartbeatAppVersion = '1.5.2';
 
-    const postJson = vi.fn().mockResolvedValue(undefined);
+    const postJson = vi.fn().mockResolvedValue(true);
     const scheduler = createScheduler();
     const runtime = createTelemetryRuntime({
       appVersion: '1.5.2',
@@ -253,7 +301,7 @@ describe('telemetry runtime', () => {
       appVersion: '1.5.2',
       envMode: 'minimal',
       store,
-      transport: { postJson: vi.fn().mockResolvedValue(undefined) },
+      transport: { postJson: vi.fn().mockResolvedValue(true) },
       metadata: createMetadata('minimal', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
       now: () => new Date('2026-04-21T00:05:00.000Z'),
       phase1BaseUrl: 'https://telemetry.example.com',
