@@ -149,7 +149,15 @@ async function resolveFreshInstall(hasExisting: boolean): Promise<boolean> {
     return true;
   }
 
-  if (process.env.NERVE_INSTALLER || isDefaults || process.stdin.isTTY !== true) {
+  if (process.env.NERVE_INSTALLER) {
+    return false;
+  }
+
+  if (isDefaults) {
+    return true;
+  }
+
+  if (process.stdin.isTTY !== true) {
     return false;
   }
 

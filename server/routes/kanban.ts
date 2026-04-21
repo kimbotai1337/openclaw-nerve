@@ -1062,6 +1062,11 @@ app.post('/api/kanban/proposals/:id/approve', rateLimitGeneral, async (c) => {
 
   try {
     const { proposal, task } = await store.approveProposal(id);
+    if (proposal.type === 'create') {
+      recordKanbanTaskCreatedTelemetry();
+    } else {
+      markKanbanFeatureUsed();
+    }
     return c.json({ proposal, task });
   } catch (err) {
     const invalidStatusResponse = handleInvalidTaskStatusError(c, err);

@@ -2894,6 +2894,47 @@ describe('kanban telemetry instrumentation', () => {
     expect(telemetryRuntimeMock.recordKanbanTaskCreated).not.toHaveBeenCalled();
   });
 
+  it('marks kanban used and records a detailed event when a create proposal is approved', async () => {
+    const app = await buildApp();
+    const createRes = await app.request('/api/kanban/proposals', json({
+      type: 'create',
+      payload: { title: 'Approve me', priority: 'high' },
+      proposedBy: 'agent:codex',
+    }));
+    const proposal = await createRes.json() as { id: string };
+    resetKanbanTelemetryMock();
+
+    const res = await app.request(`/api/kanban/proposals/${proposal.id}/approve`, { method: 'POST' });
+
+    expect(res.status).toBe(200);
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('kanban');
+    expect(telemetryRuntimeMock.recordKanbanTaskCreated).toHaveBeenCalledTimes(1);
+    expect(telemetryRuntimeMock.recordKanbanTaskCreated).toHaveBeenCalledWith({
+      surface: 'kanban',
+      success: true,
+    });
+  });
+
+  it('marks kanban used without a create event when an update proposal is approved', async () => {
+    const app = await buildApp();
+    const task = await createTask(app, { title: 'Original' });
+    const createRes = await app.request('/api/kanban/proposals', json({
+      type: 'update',
+      payload: { id: task.id, title: 'Updated' },
+      proposedBy: 'agent:codex',
+    }));
+    const proposal = await createRes.json() as { id: string };
+    resetKanbanTelemetryMock();
+
+    const res = await app.request(`/api/kanban/proposals/${proposal.id}/approve`, { method: 'POST' });
+
+    expect(res.status).toBe(200);
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
+    expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('kanban');
+    expect(telemetryRuntimeMock.recordKanbanTaskCreated).not.toHaveBeenCalled();
+  });
+
   it('marks kanban used when a review task is approved', async () => {
     const app = await buildApp();
     const task = await createTask(app, { status: 'todo' });
