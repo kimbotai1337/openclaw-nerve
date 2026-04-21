@@ -363,6 +363,11 @@ function createGatewayRelay(
         if (!pendingTool) return;
         pendingTools.delete(data.toolCallId);
         recordToolCompleted(pendingTool, true);
+        return;
+      }
+
+      if (payload.stream === 'lifecycle' && (data?.phase === 'end' || data?.phase === 'error')) {
+        flushPendingToolsForRun(runId, false);
       }
       return;
     }

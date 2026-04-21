@@ -1181,6 +1181,54 @@ describe('ws-proxy', () => {
 
       ws.close();
     });
+
+    it('emits failed tool_call_completed when CLI lifecycle ends before a pending tool returns', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:main:main',
+          runId: 'run-tool-lifecycle-end-1',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'custom_tool',
+            toolCallId: 'tool-lifecycle-end-1',
+          },
+        },
+      }));
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:main:main',
+          runId: 'run-tool-lifecycle-end-1',
+          stream: 'lifecycle',
+          data: {
+            phase: 'end',
+          },
+        },
+      }));
+
+      await vi.waitFor(() => {
+        expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledTimes(1);
+      });
+
+      expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: 'custom_tool',
+        success: false,
+        surface: 'chat',
+      }));
+
+      ws.close();
+    });
   });
 });
 

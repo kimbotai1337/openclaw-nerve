@@ -126,12 +126,16 @@ function stampTelemetry(
   }
 }
 
+function resolveSetupInstallMethod(): 'release' | 'source' {
+  return process.env.NERVE_SETUP_INSTALL_METHOD === 'release' ? 'release' : 'source';
+}
+
 function finalizeSetupTelemetry(isFreshInstall: boolean): void {
-  // Only confirmed fresh source installs should rewrite provenance.
+  // Only confirmed fresh installs should rewrite provenance.
   // Legacy installs (missing provenance) must remain unknown, but a real
   // fresh install should replace any stale global markers from older installs.
   if (isFreshInstall) {
-    stampTelemetry('install-method', 'source', { source: 'setup' });
+    stampTelemetry('install-method', resolveSetupInstallMethod(), { source: 'setup' });
     stampTelemetry('bootstrap', 'fresh_install', { source: 'setup' });
   }
 }

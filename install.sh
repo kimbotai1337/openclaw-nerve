@@ -723,7 +723,9 @@ else
   # Stamp install-method based on ref kind:
   # - release/version → release (tagged version installs)
   # - branch/branch-fallback → source (dev/branch installs)
+  SETUP_INSTALL_METHOD="source"
   if [[ "$TARGET_REF_KIND" == "release" || "$TARGET_REF_KIND" == "version" ]]; then
+    SETUP_INSTALL_METHOD="release"
     stamp_telemetry install-method release --source install.sh
   else
     stamp_telemetry install-method source --source install.sh
@@ -994,7 +996,7 @@ else
         if read -r answer < /dev/tty 2>/dev/null; then
           if [[ "$(echo "$answer" | tr "[:upper:]" "[:lower:]")" == "y" ]]; then
             echo ""
-            NERVE_INSTALLER=1 NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup < /dev/tty 2>/dev/null || {
+            NERVE_INSTALLER=1 NERVE_SETUP_INSTALL_METHOD="$SETUP_INSTALL_METHOD" NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup < /dev/tty 2>/dev/null || {
               warn "Setup wizard failed (no TTY?) — run ${CYAN}npm run setup${NC} manually"
             }
           else
@@ -1008,12 +1010,12 @@ else
       fi
     elif [[ -n "$ACCESS_MODE" ]]; then
       info "Explicit access mode requested — running non-interactive setup wizard..."
-      NERVE_INSTALLER=1 NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup -- --defaults --access-mode "$ACCESS_MODE" || {
+      NERVE_INSTALLER=1 NERVE_SETUP_INSTALL_METHOD="$SETUP_INSTALL_METHOD" NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup -- --defaults --access-mode "$ACCESS_MODE" || {
         fail "Setup failed for --access-mode ${ACCESS_MODE}"
         exit 1
       }
     elif [[ "$INTERACTIVE" == "true" ]]; then
-      NERVE_INSTALLER=1 npm run setup < /dev/tty 2>/dev/null || {
+      NERVE_INSTALLER=1 NERVE_SETUP_INSTALL_METHOD="$SETUP_INSTALL_METHOD" NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup < /dev/tty 2>/dev/null || {
         warn "Setup wizard failed — attempting auto-config from gateway..."
         generate_env_from_gateway
       }
