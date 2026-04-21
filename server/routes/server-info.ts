@@ -128,6 +128,7 @@ app.get('/api/server-info', rateLimitGeneral, async (c) => {
     telemetryEnabled: false,
     telemetryPublicDocUrl: config.telemetryPublicDocUrl,
     showFreshInstallNotice: false,
+    freshInstallNoticeId: '',
   };
 
   return c.json({
@@ -140,6 +141,7 @@ app.get('/api/server-info', rateLimitGeneral, async (c) => {
       mode: telemetry.telemetryMode,
       publicDocUrl: telemetry.telemetryPublicDocUrl,
       showFreshInstallNotice: telemetry.showFreshInstallNotice,
+      freshInstallNoticeId: telemetry.freshInstallNoticeId,
     },
   });
 });

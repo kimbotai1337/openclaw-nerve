@@ -77,6 +77,13 @@ describe('telemetry install metadata', () => {
     })).toBe('off');
   });
 
+  it('fails closed to off when NERVE_TELEMETRY_MODE is set to an invalid value', () => {
+    expect(resolveTelemetryMode({
+      envMode: ' definitely-not-valid ',
+      bootstrap: { kind: 'fresh_install', stampedAt: '2026-04-21T00:00:00Z', source: 'setup' },
+    })).toBe('off');
+  });
+
   it('falls back to unknown install method when the stamp is missing', () => {
     expect(readInstallMethodOrUnknown(undefined)).toBe('unknown');
   });
@@ -165,6 +172,15 @@ describe('telemetry install metadata', () => {
       expect(readBootstrapMarker()).toBeUndefined();
 
       const result = ensureLegacyUpgradeMarker({ envMode: 'detailed', stampedAt: '2026-04-21T12:00:00Z' });
+
+      expect(result).toBeUndefined();
+      expect(readBootstrapMarker()).toBeUndefined();
+    });
+
+    it('does not stamp upgrade_legacy when explicit NERVE_TELEMETRY_MODE is invalid', () => {
+      expect(readBootstrapMarker()).toBeUndefined();
+
+      const result = ensureLegacyUpgradeMarker({ envMode: 'bogus', stampedAt: '2026-04-21T12:00:00Z' });
 
       expect(result).toBeUndefined();
       expect(readBootstrapMarker()).toBeUndefined();

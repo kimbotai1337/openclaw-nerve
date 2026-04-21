@@ -45,6 +45,7 @@ export interface SessionTelemetryDisclosure {
   mode: 'off' | 'minimal' | 'detailed';
   publicDocUrl: string;
   showFreshInstallNotice: boolean;
+  freshInstallNoticeId: string;
 }
 
 interface SessionContextValue {
@@ -84,6 +85,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     mode: 'off',
     publicDocUrl: '',
     showFreshInstallNotice: false,
+    freshInstallNoticeId: '',
   });
   const [defaultAgentWorkspaceRoot, setDefaultAgentWorkspaceRoot] = useState<string | null>(null);
   const [rootIdentityNames, setRootIdentityNames] = useState<Record<string, string>>({});
@@ -188,6 +190,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           mode: nextTelemetry?.mode === 'minimal' || nextTelemetry?.mode === 'detailed' ? nextTelemetry.mode : 'off',
           publicDocUrl: typeof nextTelemetry?.publicDocUrl === 'string' ? nextTelemetry.publicDocUrl : '',
           showFreshInstallNotice: nextTelemetry?.showFreshInstallNotice === true,
+          freshInstallNoticeId: typeof nextTelemetry?.freshInstallNoticeId === 'string' ? nextTelemetry.freshInstallNoticeId : '',
         });
         setDefaultAgentWorkspaceRoot(
           typeof data.defaultAgentWorkspaceRoot === 'string' && data.defaultAgentWorkspaceRoot.trim()

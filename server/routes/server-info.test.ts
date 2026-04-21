@@ -14,6 +14,7 @@ const runtime = vi.hoisted(() => ({
     telemetryEnabled: true,
     telemetryPublicDocUrl: 'https://example.com/telemetry',
     showFreshInstallNotice: true,
+    freshInstallNoticeId: 'install-2026-04-20',
   },
 }));
 
@@ -111,6 +112,7 @@ describe('GET /api/server-info', () => {
       mode: 'minimal',
       publicDocUrl: 'https://example.com/telemetry',
       showFreshInstallNotice: true,
+      freshInstallNoticeId: 'install-2026-04-20',
     });
   });
 
@@ -145,6 +147,7 @@ describe('GET /api/server-info', () => {
       mode: 'minimal',
       publicDocUrl: 'https://example.com/telemetry',
       showFreshInstallNotice: true,
+      freshInstallNoticeId: 'install-2026-04-20',
     });
     expect(execCalls).toEqual([
       { file: 'ps', args: ['-axo', 'pid=,comm='] },

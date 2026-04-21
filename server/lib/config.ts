@@ -76,7 +76,7 @@ export const config = {
   telemetryDir: process.env.NERVE_TELEMETRY_DIR || path.join(HOME, '.nerve', 'telemetry'),
   telemetryPhase1BaseUrl: 'https://telemetry.nerve.zone',
   telemetryPhase2BaseUrl: 'https://analytics.nerve.zone',
-  telemetryPublicDocUrl: 'https://github.com/daggerhashimoto/openclaw-nerve/blob/master/docs/TELEMETRY.md',
+  telemetryPublicDocUrl: '/api/telemetry/docs',
 
   // Agent identity (used in UI)
   agentName: process.env.AGENT_NAME || 'Agent',
@@ -282,6 +282,13 @@ export function validateConfig(): void {
     console.warn(
       '[config] ⚠ Server binds to ' + config.host + ' — API may be accessible from the network.\n' +
       '         Set HOST=127.0.0.1 for local-only access.',
+    );
+  }
+
+  const normalizedTelemetryMode = config.telemetryModeRaw.trim().toLowerCase();
+  if (config.telemetryModeRaw && normalizedTelemetryMode !== 'off' && normalizedTelemetryMode !== 'minimal' && normalizedTelemetryMode !== 'detailed') {
+    console.warn(
+      `[config] ⚠ Invalid NERVE_TELEMETRY_MODE=${config.telemetryModeRaw} — valid values are off, minimal, or detailed. Falling back to off.`,
     );
   }
 

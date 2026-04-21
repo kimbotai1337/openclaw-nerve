@@ -23,6 +23,7 @@ let serverInfoResponse: {
     mode: 'off' | 'minimal' | 'detailed';
     publicDocUrl: string;
     showFreshInstallNotice: boolean;
+    freshInstallNoticeId?: string;
   };
 };
 
@@ -112,6 +113,7 @@ function SessionTelemetryProbe() {
       <div data-testid="telemetry-mode">{telemetry.mode}</div>
       <div data-testid="telemetry-doc">{telemetry.publicDocUrl}</div>
       <div data-testid="telemetry-fresh">{String(telemetry.showFreshInstallNotice)}</div>
+      <div data-testid="telemetry-notice-id">{telemetry.freshInstallNoticeId}</div>
     </div>
   );
 }
@@ -134,6 +136,7 @@ describe('SessionContext', () => {
         mode: 'minimal',
         publicDocUrl: 'https://example.com/telemetry',
         showFreshInstallNotice: false,
+        freshInstallNoticeId: '',
       },
     };
 
@@ -206,6 +209,7 @@ describe('SessionContext', () => {
       mode: 'minimal',
       publicDocUrl: 'https://example.com/telemetry-docs',
       showFreshInstallNotice: true,
+      freshInstallNoticeId: 'install-2026-04-20',
     };
 
     render(<SessionProvider><SessionTelemetryProbe /></SessionProvider>);
@@ -214,6 +218,7 @@ describe('SessionContext', () => {
       expect(screen.getByTestId('telemetry-mode')).toHaveTextContent('minimal');
       expect(screen.getByTestId('telemetry-doc')).toHaveTextContent('https://example.com/telemetry-docs');
       expect(screen.getByTestId('telemetry-fresh')).toHaveTextContent('true');
+      expect(screen.getByTestId('telemetry-notice-id')).toHaveTextContent('install-2026-04-20');
     });
   });
 

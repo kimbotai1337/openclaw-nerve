@@ -349,6 +349,55 @@ describe('telemetry runtime', () => {
     await secondRuntime.stop();
   });
 
+  it('still emits detailed events when Phase 1 store writes fail', async () => {
+    const { store } = createMemoryStore();
+    const transportPostJson = vi.fn().mockResolvedValue(true);
+    const detailedPostJson = vi.fn().mockResolvedValue(true);
+    const runtime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: 'detailed',
+      store: {
+        ...store,
+        recordSessionCreated: vi.fn(async () => {
+          throw new Error('disk full');
+        }),
+        recordMessageSubmitted: vi.fn(async () => {
+          throw new Error('disk full');
+        }),
+        recordToolCompleted: vi.fn(async () => {
+          throw new Error('disk full');
+        }),
+      },
+      transport: { postJson: transportPostJson },
+      detailedTransport: { postJson: detailedPostJson },
+      metadata: createMetadata('detailed', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T00:05:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      phase2BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await runtime.start();
+    await expect(runtime.recordSessionCreated({ occurredAt: '2026-04-21T00:05:01.000Z' })).resolves.toBeUndefined();
+    await expect(runtime.recordMessageSubmitted('2026-04-21T00:05:02.000Z')).resolves.toBeUndefined();
+    await expect(runtime.recordToolCompleted({
+      toolName: 'read',
+      success: true,
+      startedAt: 0,
+      finishedAt: 1,
+      occurredAt: '2026-04-21T00:05:03.000Z',
+    })).resolves.toBeUndefined();
+    await flushAsyncWork();
+
+    expect(detailedPostJson.mock.calls.map(([, payload]) => (payload as { event: string }).event)).toEqual([
+      'session_created',
+      'message_submitted',
+      'tool_call_completed',
+    ]);
+
+    await runtime.stop();
+  });
+
   it('schedules daily heartbeats and clears the timer on stop', async () => {
     const { store, snapshot } = createMemoryStore();
     snapshot.lastHeartbeatSentAtByReason.first_seen = '2026-04-20T00:00:00.000Z';
@@ -410,6 +459,7 @@ describe('telemetry runtime', () => {
       telemetryEnabled: true,
       telemetryPublicDocUrl: 'https://example.com/telemetry',
       showFreshInstallNotice: true,
+      freshInstallNoticeId: '2026-04-20T00:00:00.000Z',
     });
 
     await runtime.stop();

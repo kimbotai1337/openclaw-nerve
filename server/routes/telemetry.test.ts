@@ -42,6 +42,17 @@ describe('telemetry relay routes', () => {
     return app;
   }
 
+  it('serves the build-matched telemetry documentation', async () => {
+    mockDeps();
+    const app = await buildApp();
+
+    const res = await app.request('/api/telemetry/docs');
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect(await res.text()).toContain('# Telemetry');
+  });
+
   it('rejects invalid event values with a 400', async () => {
     mockDeps();
     const app = await buildApp();

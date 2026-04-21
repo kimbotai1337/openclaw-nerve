@@ -65,6 +65,7 @@ const {
       mode: 'minimal',
       publicDocUrl: 'https://example.com/telemetry',
       showFreshInstallNotice: false,
+      freshInstallNoticeId: '',
     },
   };
 
@@ -961,6 +962,25 @@ describe('App telemetry workspace switching', () => {
   });
 
   it('emits branch_switched when a new top-level root is created and opened', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn Root Charlie' }));
+
+    await waitFor(() => {
+      expect(sessionContext.spawnSession).toHaveBeenCalledWith({
+        kind: 'root',
+        agentName: 'Charlie',
+        task: 'Investigate workspace guard',
+        model: 'test-model',
+        thinking: 'medium',
+      });
+      expect(emitBranchSwitchedMock).toHaveBeenCalledWith({ success: true });
+    });
+  });
+
+  it('emits branch_switched when the first top-level root is created from an empty workspace', async () => {
+    sessionContext.currentSession = '';
+
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Spawn Root Charlie' }));

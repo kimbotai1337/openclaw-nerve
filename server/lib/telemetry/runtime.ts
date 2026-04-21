@@ -83,6 +83,7 @@ export interface TelemetryServerInfoDisclosure {
   telemetryEnabled: boolean;
   telemetryPublicDocUrl: string;
   showFreshInstallNotice: boolean;
+  freshInstallNoticeId: string;
 }
 
 export interface TelemetryRuntime {
@@ -223,6 +224,14 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
     })());
   }
 
+  async function runStoreWrite(work: () => Promise<void>): Promise<void> {
+    try {
+      await work();
+    } catch {
+      return;
+    }
+  }
+
   async function sendHeartbeat(reason: HeartbeatReason, sentAt = now()): Promise<void> {
     if (mode === 'off' || !instanceId) {
       return;
@@ -342,11 +351,13 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
     },
 
     getServerInfoDisclosure() {
+      const showFreshInstallNotice = mode === 'minimal' && bootstrap?.kind === 'fresh_install';
       return {
         telemetryMode: mode,
         telemetryEnabled: telemetryEnabled(),
         telemetryPublicDocUrl: publicDocUrl,
-        showFreshInstallNotice: mode === 'minimal' && bootstrap?.kind === 'fresh_install',
+        showFreshInstallNotice,
+        freshInstallNoticeId: showFreshInstallNotice ? bootstrap?.stampedAt || '' : '',
       };
     },
 
@@ -356,7 +367,7 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
       }
 
       const normalized = normalizeSessionCreatedInput(input);
-      await store.recordSessionCreated(normalized.occurredAt);
+      await runStoreWrite(() => store.recordSessionCreated(normalized.occurredAt));
 
       sendDetailedEvent(buildSessionCreatedEvent({
         identity: { instanceId },
@@ -373,7 +384,7 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
       }
 
       const normalized = normalizeMessageSubmittedInput(input);
-      await store.recordMessageSubmitted(normalized.occurredAt);
+      await runStoreWrite(() => store.recordMessageSubmitted(normalized.occurredAt));
 
       sendDetailedEvent(buildMessageSubmittedEvent({
         identity: { instanceId },
@@ -389,7 +400,7 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         return;
       }
 
-      await store.recordToolCompleted(input);
+      await runStoreWrite(() => store.recordToolCompleted(input));
 
       sendDetailedEvent(buildToolCallCompletedEvent({
         identity: { instanceId },
@@ -440,7 +451,7 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         return;
       }
 
-      await store.markFeatureUsed(feature, at);
+      await runStoreWrite(() => store.markFeatureUsed(feature, at));
     },
 
     async markSessionSeen(sessionKey) {
@@ -451,7 +462,14 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         };
       }
 
-      return store.markSessionSeen(sessionKey);
+      try {
+        return await store.markSessionSeen(sessionKey);
+      } catch {
+        return {
+          firstSeen: false,
+          sessionHash: '',
+        };
+      }
     },
 
     async reportError(input) {

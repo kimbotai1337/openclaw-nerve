@@ -674,8 +674,10 @@ export default function App({ onLogout }: AppProps) {
   }, [discardAllDirtyFiles, pendingWorkspaceSwitch, workspaceSwitchAction]);
 
   const maybeEmitBranchSwitchTelemetry = useCallback((fromSessionKey: string, toSessionKey: string) => {
-    if (!fromSessionKey || !toSessionKey) return;
-    if (getWorkspaceRootSessionKey(fromSessionKey) === getWorkspaceRootSessionKey(toSessionKey)) return;
+    const fromRootSessionKey = fromSessionKey ? getWorkspaceRootSessionKey(fromSessionKey) : null;
+    const toRootSessionKey = toSessionKey ? getWorkspaceRootSessionKey(toSessionKey) : null;
+    if (!toRootSessionKey) return;
+    if (fromRootSessionKey === toRootSessionKey) return;
     void emitBranchSwitched({ success: true });
   }, []);
 
@@ -994,6 +996,7 @@ export default function App({ onLogout }: AppProps) {
         visible={telemetry.showFreshInstallNotice}
         mode={telemetry.mode}
         publicDocUrl={telemetry.publicDocUrl}
+        noticeId={telemetry.freshInstallNoticeId}
       />
       
       {(!isCompactLayout || !isMobileTopBarHidden) && (

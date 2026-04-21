@@ -90,6 +90,10 @@ function normalizeTelemetryMode(value: string | null | undefined): TelemetryMode
   return undefined;
 }
 
+function hasExplicitTelemetryModeInput(value: string | null | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
 export function readIdentity(): IdentityRecord | undefined {
   const identity = readJsonFile<Partial<IdentityRecord>>(IDENTITY_FILE);
   if (!identity || typeof identity.instanceId !== 'string' || !identity.instanceId) {
@@ -182,6 +186,10 @@ export function resolveTelemetryMode(params: {
   const explicitMode = normalizeTelemetryMode(params.envMode);
   if (explicitMode) return explicitMode;
 
+  if (hasExplicitTelemetryModeInput(params.envMode)) {
+    return 'off';
+  }
+
   return isTrustedFreshInstallBootstrap(params.bootstrap) ? 'minimal' : 'off';
 }
 
@@ -194,7 +202,7 @@ export function ensureLegacyUpgradeMarker(params: {
     return current;
   }
 
-  if (normalizeTelemetryMode(params.envMode)) {
+  if (hasExplicitTelemetryModeInput(params.envMode)) {
     return current;
   }
 

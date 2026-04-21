@@ -1,9 +1,14 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getTelemetryRuntime } from '../lib/telemetry/runtime.js';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 
 const app = new Hono();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TELEMETRY_DOC_PATH = path.resolve(__dirname, '../../docs/TELEMETRY.md');
 
 const sessionOpenedEventSchema = z.object({
   event: z.literal('session_opened'),
@@ -54,6 +59,16 @@ async function recordUiTelemetryEvent(payload: z.infer<typeof uiTelemetryEventSc
     return;
   }
 }
+
+app.get('/api/telemetry/docs', rateLimitGeneral, async (c) => {
+  try {
+    const doc = await fs.readFile(TELEMETRY_DOC_PATH, 'utf8');
+    c.header('Content-Type', 'text/markdown; charset=utf-8');
+    return c.body(doc);
+  } catch {
+    return c.text('Telemetry documentation unavailable', 503);
+  }
+});
 
 app.post('/api/telemetry/events', rateLimitGeneral, async (c) => {
   let body: unknown;

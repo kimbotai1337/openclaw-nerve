@@ -173,9 +173,10 @@ NERVE_TELEMETRY_DIR=~/.nerve/telemetry
 
 Mode resolution is:
 
-1. explicit `NERVE_TELEMETRY_MODE` wins
-2. otherwise a trusted fresh install resolves to `minimal`
-3. otherwise Nerve resolves to `off`
+1. valid explicit `NERVE_TELEMETRY_MODE` wins
+2. invalid non-empty `NERVE_TELEMETRY_MODE` values fail closed to `off`
+3. otherwise a trusted fresh install resolves to `minimal`
+4. otherwise Nerve resolves to `off`
 
 Fresh installs created by `install.sh` or `npm run setup` default to `minimal`. Legacy upgrades stay `off` until explicitly configured. The first-run telemetry notice is informational only.
 

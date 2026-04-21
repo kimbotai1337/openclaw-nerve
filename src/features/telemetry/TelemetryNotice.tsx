@@ -1,33 +1,43 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
 export const TELEMETRY_NOTICE_DISMISS_KEY = 'nerve:telemetry:fresh-install-notice-dismissed';
+
+export function buildTelemetryNoticeDismissKey(noticeId?: string): string {
+  return noticeId ? `${TELEMETRY_NOTICE_DISMISS_KEY}:${noticeId}` : TELEMETRY_NOTICE_DISMISS_KEY;
+}
 
 interface TelemetryNoticeProps {
   visible: boolean;
   mode: 'off' | 'minimal' | 'detailed';
   publicDocUrl: string;
+  noticeId?: string;
 }
 
-function readDismissed(): boolean {
+function readDismissed(storageKey: string): boolean {
   try {
-    return localStorage.getItem(TELEMETRY_NOTICE_DISMISS_KEY) === 'true';
+    return localStorage.getItem(storageKey) === 'true';
   } catch {
     return false;
   }
 }
 
-export function TelemetryNotice({ visible, mode, publicDocUrl }: TelemetryNoticeProps) {
-  const [dismissed, setDismissed] = useState(readDismissed);
+export function TelemetryNotice({ visible, mode, publicDocUrl, noticeId }: TelemetryNoticeProps) {
+  const dismissStorageKey = useMemo(() => buildTelemetryNoticeDismissKey(noticeId), [noticeId]);
+  const [dismissed, setDismissed] = useState(() => readDismissed(dismissStorageKey));
+
+  useEffect(() => {
+    setDismissed(readDismissed(dismissStorageKey));
+  }, [dismissStorageKey]);
 
   const handleDismiss = useCallback(() => {
     setDismissed(true);
     try {
-      localStorage.setItem(TELEMETRY_NOTICE_DISMISS_KEY, 'true');
+      localStorage.setItem(dismissStorageKey, 'true');
     } catch {
       // ignore storage failures
     }
-  }, []);
+  }, [dismissStorageKey]);
 
   if (!visible || dismissed) return null;
 
@@ -39,7 +49,7 @@ export function TelemetryNotice({ visible, mode, publicDocUrl }: TelemetryNotice
       <div className="min-w-0 space-y-1 leading-5">
         <p className="font-medium">This fresh install is using {mode} telemetry.</p>
         <p>
-          Nerve sends a small set of product and reliability events in minimal mode.{' '}
+          Minimal telemetry sends heartbeat snapshots and scrubbed server-side error reports.{' '}
           <a
             href={publicDocUrl}
             target="_blank"
@@ -51,7 +61,7 @@ export function TelemetryNotice({ visible, mode, publicDocUrl }: TelemetryNotice
           .
         </p>
         <p className="text-muted-foreground">
-          To disable telemetry entirely, update the server configuration. This banner only explains the default.
+          To disable telemetry entirely, set <code>NERVE_TELEMETRY_MODE=off</code> in <code>.env</code> and restart Nerve.
         </p>
       </div>
       <button

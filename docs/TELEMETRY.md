@@ -31,13 +31,15 @@ Fresh installs created by `install.sh` or `npm run setup` default to `minimal`. 
 Nerve resolves the effective telemetry mode in this order:
 
 1. If `NERVE_TELEMETRY_MODE` is set to `off`, `minimal`, or `detailed`, that exact value wins.
-2. Otherwise, if Nerve has a trusted `fresh_install` bootstrap marker written by `install.sh` or `npm run setup`, the effective mode is `minimal`.
-3. Otherwise, the effective mode is `off`.
+2. If `NERVE_TELEMETRY_MODE` is set to any other non-empty value, Nerve fails closed to `off`.
+3. Otherwise, if Nerve has a trusted `fresh_install` bootstrap marker written by `install.sh` or `npm run setup`, the effective mode is `minimal`.
+4. Otherwise, the effective mode is `off`.
 
 That means:
 
-- explicit env config always overrides install defaults
-- trusted fresh installs fail open to `minimal`
+- valid explicit env config always overrides install defaults
+- invalid explicit env config fails closed to `off`
+- trusted fresh installs fall back to `minimal` only when the mode is unset
 - anything else, including legacy upgrades without an explicit mode, fails safe to `off`
 
 ## Local files written by telemetry
@@ -137,7 +139,7 @@ Heartbeat snapshots also contain exactly these feature booleans:
 Current code records branch telemetry with these semantics:
 
 - `branch_created` is a local UI event emitted after a new top-level root agent is created and opened
-- `branch_switched` is emitted when the workspace changes between different top-level roots
+- `branch_switched` is emitted when the workspace changes between different top-level roots, including creating and opening the first top-level root from an empty workspace
 - switching between a root session and one of its own subagents does not emit `branch_switched`
 
 `branch_created` only marks the Phase 1 `branches` boolean locally. `branch_switched` marks the `branches` boolean locally and becomes a Phase 2 detailed event only in `detailed` mode.
@@ -390,7 +392,7 @@ Raw tool names do not leave the box. Unknown tools are coerced to `other`.
 | `session_created` | server | successful subagent spawn, or first successful message into a previously unseen root session |
 | `message_submitted` | server | successful `chat.send` through the Nerve proxy |
 | `tool_call_completed` | server | tool result arrival or run failure before a pending tool returns |
-| `branch_switched` | browser via Nerve relay | switch to a different top-level root, or create and open a new top-level root |
+| `branch_switched` | browser via Nerve relay | switch to a different top-level root, including creating and opening the first top-level root from an empty workspace |
 | `kanban_task_created` | server | successful Kanban task creation |
 
 ## Fresh installs, upgrades, and the first-run notice
@@ -404,11 +406,11 @@ If the effective mode is `minimal` and the bootstrap marker is `fresh_install`, 
 That notice:
 
 - says the fresh install is using minimal telemetry
-- links to this public document
-- explains that disabling telemetry is done in server config
+- links to the build-matched public telemetry document served by the running Nerve instance
+- explains that disabling telemetry means setting `NERVE_TELEMETRY_MODE=off` in `.env` and restarting Nerve
 - is informational only
 
-Dismissing it only hides the banner locally in browser storage. It does not change server configuration or telemetry mode.
+Dismissing it only hides the banner locally in browser storage for that disclosed install. It does not change server configuration or telemetry mode.
 
 ### Legacy upgrades
 

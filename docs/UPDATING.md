@@ -37,7 +37,7 @@ This will:
 - Legacy upgrades stay `off` until explicitly configured.
 - The first-run telemetry notice is shown only for fresh installs in `minimal` mode.
 - That first-run notice is informational only. It is not a toggle and does not change the server setting.
-- To keep telemetry disabled explicitly after an upgrade, set `NERVE_TELEMETRY_MODE=off` in `.env`.
+- To keep telemetry disabled explicitly after an upgrade, set `NERVE_TELEMETRY_MODE=off` in `.env` and restart Nerve.
 - For the exact telemetry contract, see [TELEMETRY.md](./TELEMETRY.md).
 
 ## CLI flags
