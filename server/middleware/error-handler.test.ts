@@ -32,6 +32,7 @@ function createMemoryStore(): TelemetryStore {
       snapshot.active24h = true;
     },
     async recordToolCompleted(_input: RecordToolCompletedInput) {
+      void _input;
       snapshot.counts24h.tool_calls += 1;
       snapshot.featuresUsed24h.chat = true;
       snapshot.active24h = true;

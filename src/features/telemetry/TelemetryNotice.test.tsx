@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TelemetryNotice, TELEMETRY_NOTICE_DISMISS_KEY, buildTelemetryNoticeDismissKey } from './TelemetryNotice';
+import { TelemetryNotice } from './TelemetryNotice';
+import { TELEMETRY_NOTICE_DISMISS_KEY, buildTelemetryNoticeDismissKey } from './telemetryNoticeStorage';
 
 describe('TelemetryNotice', () => {
   beforeEach(() => {

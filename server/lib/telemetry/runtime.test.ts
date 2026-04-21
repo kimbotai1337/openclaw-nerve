@@ -43,6 +43,7 @@ function createMemoryStore(nowIso = '2026-04-21T00:05:00.000Z'): MemoryStoreCont
     },
 
     async recordToolCompleted(_input: RecordToolCompletedInput) {
+      void _input;
       snapshot.counts24h.tool_calls += 1;
       snapshot.featuresUsed24h.chat = true;
       updateActive();
