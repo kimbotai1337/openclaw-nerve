@@ -1,4 +1,10 @@
 import { config } from '../config.js';
+import {
+  buildMessageSubmittedEvent,
+  buildSessionCreatedEvent,
+  buildToolCallCompletedEvent,
+  type DetailedEventSurface,
+} from './detailed-events.js';
 import { buildErrorPayload } from './error-reporting.js';
 import { buildHeartbeatPayload, nextDailyHeartbeatAt, shouldSendFirstSeen, shouldSendVersionChange } from './heartbeat.js';
 import {
@@ -13,7 +19,12 @@ import {
   type InstallMethodStamp,
   type TelemetryMode,
 } from './install-metadata.js';
-import { createTelemetryStore, type RecordToolCompletedInput, type TelemetryStore } from './store.js';
+import {
+  createTelemetryStore,
+  type MarkSessionSeenResult,
+  type RecordToolCompletedInput,
+  type TelemetryStore,
+} from './store.js';
 import { createTelemetryHttpTransport, type TelemetryTransport } from './http.js';
 import type { TelemetryFeatureName, HeartbeatReason } from './types.js';
 
@@ -35,6 +46,23 @@ export interface ReportTelemetryErrorInput {
   occurredAt?: Date | string | number;
 }
 
+export interface RecordSessionCreatedInput {
+  sessionKey?: string;
+  surface?: DetailedEventSurface;
+  explicit?: boolean;
+  occurredAt?: Date | string | number;
+}
+
+export interface RecordMessageSubmittedInput {
+  sessionKey?: string;
+  surface?: DetailedEventSurface;
+  occurredAt?: Date | string | number;
+}
+
+export interface RecordToolTelemetryInput extends RecordToolCompletedInput {
+  surface?: DetailedEventSurface;
+}
+
 export interface TelemetryServerInfoDisclosure {
   telemetryMode: TelemetryMode;
   telemetryEnabled: boolean;
@@ -47,10 +75,11 @@ export interface TelemetryRuntime {
   stop(): Promise<void>;
   getMode(): TelemetryMode;
   getServerInfoDisclosure(): TelemetryServerInfoDisclosure;
-  recordSessionCreated(at?: Date | string | number): Promise<void>;
-  recordMessageSubmitted(at?: Date | string | number): Promise<void>;
-  recordToolCompleted(input: RecordToolCompletedInput): Promise<void>;
+  recordSessionCreated(input?: RecordSessionCreatedInput | Date | string | number): Promise<void>;
+  recordMessageSubmitted(input?: RecordMessageSubmittedInput | Date | string | number): Promise<void>;
+  recordToolCompleted(input: RecordToolTelemetryInput): Promise<void>;
   markFeatureUsed(feature: TelemetryFeatureName, at?: Date | string | number): Promise<void>;
+  markSessionSeen(sessionKey: string): Promise<MarkSessionSeenResult>;
   reportError(input: ReportTelemetryErrorInput): Promise<void>;
 }
 
@@ -59,9 +88,11 @@ export interface CreateTelemetryRuntimeOptions {
   envMode?: string | null;
   telemetryDir?: string;
   phase1BaseUrl?: string;
+  phase2BaseUrl?: string;
   publicDocUrl?: string;
   store?: TelemetryStore;
   transport?: TelemetryTransport;
+  detailedTransport?: TelemetryTransport;
   metadata?: TelemetryMetadataApi;
   now?: () => Date;
   setTimeoutFn?: typeof setTimeout;
@@ -90,8 +121,36 @@ function createDefaultTransport(options: CreateTelemetryRuntimeOptions): Telemet
   });
 }
 
+function createDefaultDetailedTransport(options: CreateTelemetryRuntimeOptions): TelemetryTransport {
+  return createTelemetryHttpTransport({
+    baseUrl: options.phase2BaseUrl || config.telemetryPhase2BaseUrl,
+  });
+}
+
 function resolveSurface(surface?: string): string {
   return surface || 'server';
+}
+
+function isTimestampInput(value: unknown): value is Date | string | number {
+  return value instanceof Date || typeof value === 'string' || typeof value === 'number';
+}
+
+function normalizeSessionCreatedInput(
+  input?: RecordSessionCreatedInput | Date | string | number,
+): RecordSessionCreatedInput {
+  if (input === undefined || isTimestampInput(input)) {
+    return { occurredAt: input };
+  }
+  return input;
+}
+
+function normalizeMessageSubmittedInput(
+  input?: RecordMessageSubmittedInput | Date | string | number,
+): RecordMessageSubmittedInput {
+  if (input === undefined || isTimestampInput(input)) {
+    return { occurredAt: input };
+  }
+  return input;
 }
 
 export function getTelemetryRuntime(): TelemetryRuntime | null {
@@ -105,6 +164,7 @@ export function setTelemetryRuntime(runtime: TelemetryRuntime | null): void {
 export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): TelemetryRuntime {
   const store = options.store || createDefaultStore(options);
   const transport = options.transport || createDefaultTransport(options);
+  const detailedTransport = options.detailedTransport || createDefaultDetailedTransport(options);
   const metadata = options.metadata || defaultMetadata;
   const now = options.now || (() => new Date());
   const setTimeoutFn = options.setTimeoutFn || setTimeout;
@@ -130,6 +190,20 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
 
   function runInBackground(work: Promise<void>): void {
     void work.catch(() => {});
+  }
+
+  function detailedTelemetryEnabled(): boolean {
+    return mode === 'detailed' && !!instanceId;
+  }
+
+  function sendDetailedEvent(payload: unknown): void {
+    if (!detailedTelemetryEnabled()) {
+      return;
+    }
+
+    runInBackground((async () => {
+      await detailedTransport.postJson('/v1/events', payload);
+    })());
   }
 
   async function sendHeartbeat(reason: HeartbeatReason, sentAt = now()): Promise<void> {
@@ -259,20 +333,38 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
       };
     },
 
-    async recordSessionCreated(at) {
+    async recordSessionCreated(input) {
       if (!telemetryEnabled()) {
         return;
       }
 
-      await store.recordSessionCreated(at);
+      const normalized = normalizeSessionCreatedInput(input);
+      await store.recordSessionCreated(normalized.occurredAt);
+
+      sendDetailedEvent(buildSessionCreatedEvent({
+        identity: { instanceId },
+        appVersion: options.appVersion,
+        installMethod,
+        surface: normalized.surface || 'chat',
+        sentAt: normalized.occurredAt,
+      }));
     },
 
-    async recordMessageSubmitted(at) {
+    async recordMessageSubmitted(input) {
       if (!telemetryEnabled()) {
         return;
       }
 
-      await store.recordMessageSubmitted(at);
+      const normalized = normalizeMessageSubmittedInput(input);
+      await store.recordMessageSubmitted(normalized.occurredAt);
+
+      sendDetailedEvent(buildMessageSubmittedEvent({
+        identity: { instanceId },
+        appVersion: options.appVersion,
+        installMethod,
+        surface: normalized.surface || 'chat',
+        sentAt: normalized.occurredAt,
+      }));
     },
 
     async recordToolCompleted(input) {
@@ -281,6 +373,18 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
       }
 
       await store.recordToolCompleted(input);
+
+      sendDetailedEvent(buildToolCallCompletedEvent({
+        identity: { instanceId },
+        appVersion: options.appVersion,
+        installMethod,
+        surface: input.surface || 'chat',
+        toolName: input.toolName,
+        success: input.success,
+        startedAt: input.startedAt,
+        finishedAt: input.finishedAt,
+        sentAt: input.occurredAt ?? input.finishedAt,
+      }));
     },
 
     async markFeatureUsed(feature, at) {
@@ -289,6 +393,17 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
       }
 
       await store.markFeatureUsed(feature, at);
+    },
+
+    async markSessionSeen(sessionKey) {
+      if (!telemetryEnabled()) {
+        return {
+          firstSeen: false,
+          sessionHash: '',
+        };
+      }
+
+      return store.markSessionSeen(sessionKey);
     },
 
     async reportError(input) {

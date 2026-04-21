@@ -19,6 +19,7 @@ import { config } from '../lib/config.js';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { spawnSubagent } from '../lib/subagent-spawn.js';
 import { normalizeAgentId } from '../lib/agent-workspace.js';
+import { getTelemetryRuntime } from '../lib/telemetry/runtime.js';
 
 const app = new Hono();
 const CRON_SESSION_RE = /^agent:[^:]+:cron:[^:]+(?::run:.+)?$/;
@@ -379,6 +380,12 @@ app.post('/api/sessions/spawn-subagent', rateLimitGeneral, async (c) => {
       model: parsed.data.model,
       thinking: parsed.data.thinking,
       cleanup: parsed.data.cleanup,
+    });
+
+    await getTelemetryRuntime()?.recordSessionCreated({
+      sessionKey: result.sessionKey,
+      surface: 'sessions',
+      explicit: true,
     });
 
     return c.json({
