@@ -10,17 +10,18 @@ let ensureLegacyUpgradeMarker: typeof import('./install-metadata.js').ensureLega
 let readBootstrapMarker: typeof import('./install-metadata.js').readBootstrapMarker;
 let readInstallMethod: typeof import('./install-metadata.js').readInstallMethod;
 let readInstallMethodOrUnknown: typeof import('./install-metadata.js').readInstallMethodOrUnknown;
-let resolveInstallMethodAfterSetup: typeof import('./install-metadata.js').resolveInstallMethodAfterSetup;
 let resolveTelemetryMode: typeof import('./install-metadata.js').resolveTelemetryMode;
 let writeBootstrapMarker: typeof import('./install-metadata.js').writeBootstrapMarker;
 let writeInstallMethod: typeof import('./install-metadata.js').writeInstallMethod;
 
 describe('telemetry install metadata', () => {
   let tempDir: string;
+  let readOnlyDirs: string[];
   const originalEnv = { ...process.env };
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nerve-telemetry-metadata-'));
+    readOnlyDirs = [];
     process.env = {
       ...originalEnv,
       NERVE_TELEMETRY_DIR: tempDir,
@@ -33,7 +34,6 @@ describe('telemetry install metadata', () => {
     readBootstrapMarker = mod.readBootstrapMarker;
     readInstallMethod = mod.readInstallMethod;
     readInstallMethodOrUnknown = mod.readInstallMethodOrUnknown;
-    resolveInstallMethodAfterSetup = mod.resolveInstallMethodAfterSetup;
     resolveTelemetryMode = mod.resolveTelemetryMode;
     writeBootstrapMarker = mod.writeBootstrapMarker;
     writeInstallMethod = mod.writeInstallMethod;
@@ -42,8 +42,19 @@ describe('telemetry install metadata', () => {
   afterEach(() => {
     process.env = { ...originalEnv };
     vi.restoreAllMocks();
+    for (const dir of readOnlyDirs) {
+      fs.chmodSync(dir, 0o700);
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
+
+  function makeReadOnlyDir(name: string): string {
+    const dir = path.join(tempDir, name);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o500);
+    readOnlyDirs.push(dir);
+    return dir;
+  }
 
   it('defaults a trusted fresh install to minimal when env mode is unset', () => {
     expect(resolveTelemetryMode({
@@ -70,9 +81,9 @@ describe('telemetry install metadata', () => {
     expect(readInstallMethodOrUnknown(undefined)).toBe('unknown');
   });
 
-  it('preserves an existing release stamp when setup runs later', () => {
-    const current = { installMethod: 'release', stampedAt: '2026-04-21T00:00:00Z', source: 'install.sh' };
-    expect(resolveInstallMethodAfterSetup(current)).toEqual(current);
+  it('keeps an existing release stamp intact', () => {
+    const current = { installMethod: 'release' as const, stampedAt: '2026-04-21T00:00:00Z', source: 'install.sh' as const };
+    expect(readInstallMethodOrUnknown(current)).toBe('release');
   });
 
   it('persists a stable instance id once created', () => {
@@ -114,9 +125,30 @@ describe('telemetry install metadata', () => {
     expect(readBootstrapMarker()).toEqual(current);
   });
 
+  it('warns and continues when install-method metadata cannot be written', () => {
+    process.env.NERVE_TELEMETRY_DIR = makeReadOnlyDir('readonly-install-method');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const written = writeInstallMethod('source', 'setup', '2026-04-21T00:00:00Z');
+
+    expect(written).toEqual({ installMethod: 'source', stampedAt: '2026-04-21T00:00:00Z', source: 'setup' });
+    expect(readInstallMethod()).toBeUndefined();
+    expect(warnSpy.mock.calls.map(call => call.join(' ')).join('\n')).toContain('Failed to write install-method.json');
+  });
+
+  it('warns and continues when legacy bootstrap metadata cannot be written', () => {
+    process.env.NERVE_TELEMETRY_DIR = makeReadOnlyDir('readonly-bootstrap');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const written = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-21T00:00:00Z' });
+
+    expect(written).toEqual({ kind: 'upgrade_legacy', stampedAt: '2026-04-21T00:00:00Z', source: 'runtime' });
+    expect(readBootstrapMarker()).toBeUndefined();
+    expect(warnSpy.mock.calls.map(call => call.join(' ')).join('\n')).toContain('Failed to write bootstrap.json');
+  });
+
   describe('runtime legacy upgrade bootstrap', () => {
     it('stamps upgrade_legacy at runtime when no bootstrap marker exists', () => {
-      // No prior bootstrap marker
       expect(readBootstrapMarker()).toBeUndefined();
 
       const result = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-21T12:00:00Z' });
@@ -153,42 +185,6 @@ describe('telemetry install metadata', () => {
 
       expect(result).toEqual(original);
       expect(readBootstrapMarker()?.kind).toBe('fresh_install');
-    });
-  });
-
-  describe('setup provenance stability', () => {
-    it('does not relabel unknown install-method when setup reruns on legacy install', () => {
-      // Legacy install: no install-method stamp exists
-      expect(readInstallMethod()).toBeUndefined();
-
-      // Simulate setup rerun with isFreshInstall=false (has .env)
-      // resolveInstallMethodAfterSetup should NOT produce 'source' when current is undefined
-      // because we changed finalizeSetupTelemetry to only stamp on fresh installs
-      const resolved = resolveInstallMethodAfterSetup(undefined);
-
-      // This tests the contract: without a stamp, the function suggests 'source'
-      // but finalizeSetupTelemetry now guards against calling this for non-fresh installs
-      expect(resolved.installMethod).toBe('source');
-      // The key regression test is that setup.ts no longer calls stampTelemetry
-      // for install-method when isFreshInstall=false - that's tested in integration
-    });
-
-    it('preserves existing release stamp when setup runs on release install', () => {
-      writeInstallMethod('release', 'install.sh', '2026-04-20T00:00:00Z');
-
-      const resolved = resolveInstallMethodAfterSetup(readInstallMethod());
-
-      expect(resolved.installMethod).toBe('release');
-      expect(resolved.source).toBe('install.sh');
-    });
-
-    it('preserves existing source stamp when setup reruns on source install', () => {
-      writeInstallMethod('source', 'setup', '2026-04-20T00:00:00Z');
-
-      const resolved = resolveInstallMethodAfterSetup(readInstallMethod());
-
-      expect(resolved.installMethod).toBe('source');
-      expect(resolved.source).toBe('setup');
     });
   });
 });

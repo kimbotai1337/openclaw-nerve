@@ -43,6 +43,10 @@ function ensureTelemetryDir(): string {
   return dir;
 }
 
+function telemetryWriteErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function readJsonFile<T>(fileName: string): T | undefined {
   try {
     return JSON.parse(fs.readFileSync(telemetryPath(fileName), 'utf8')) as T;
@@ -52,11 +56,15 @@ function readJsonFile<T>(fileName: string): T | undefined {
 }
 
 function writeJsonFile(fileName: string, value: unknown): void {
-  ensureTelemetryDir();
-  fs.writeFileSync(telemetryPath(fileName), JSON.stringify(value, null, 2) + '\n', {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  try {
+    ensureTelemetryDir();
+    fs.writeFileSync(telemetryPath(fileName), JSON.stringify(value, null, 2) + '\n', {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } catch (error) {
+    console.warn(`[telemetry] Failed to write ${fileName}:`, telemetryWriteErrorMessage(error));
+  }
 }
 
 function isInstallMethod(value: unknown): value is InstallMethod {
@@ -136,21 +144,6 @@ export function writeInstallMethod(
 
 export function readInstallMethodOrUnknown(stamp = readInstallMethod()): InstallMethod {
   return stamp?.installMethod || 'unknown';
-}
-
-export function resolveInstallMethodAfterSetup(
-  current = readInstallMethod(),
-  stampedAt = new Date().toISOString(),
-): InstallMethodStamp {
-  if (current?.installMethod === 'release' || current?.installMethod === 'source') {
-    return current;
-  }
-
-  return {
-    installMethod: 'source',
-    stampedAt,
-    source: 'setup',
-  };
 }
 
 export function readBootstrapMarker(): BootstrapMarker | undefined {

@@ -11,6 +11,14 @@ function fail(message) {
   process.exit(1);
 }
 
+function warn(message) {
+  console.warn(`[telemetry-stamp] ${message}`);
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function parseArgs(argv) {
   if (argv.length < 2) {
     fail('Usage: telemetry-stamp.mjs <install-method|bootstrap> <value> [--if-missing] [--source <source>] [--dir <path>]');
@@ -61,11 +69,15 @@ function readJson(filePath) {
 }
 
 function writeJson(filePath, value) {
-  ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  try {
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } catch (error) {
+    warn(`Failed to write ${path.basename(filePath)}: ${errorMessage(error)}`);
+  }
 }
 
 function isSource(value) {

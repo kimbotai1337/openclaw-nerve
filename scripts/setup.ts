@@ -12,7 +12,7 @@
 // Show token in prompts so users can verify what they entered
 
 import { existsSync, readdirSync, mkdirSync, copyFileSync, lstatSync } from 'node:fs';
-import { execFileSync, execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -108,11 +108,21 @@ function stampTelemetry(
   if (options.ifMissing) stampArgs.push('--if-missing');
   if (options.source) stampArgs.push('--source', options.source);
 
-  execFileSync(process.execPath, stampArgs, {
+  const result = spawnSync(process.execPath, stampArgs, {
     cwd: PROJECT_ROOT,
     env: process.env,
-    stdio: 'pipe',
+    encoding: 'utf8',
   });
+  const detail = result.stderr.trim() || result.stdout.trim() || result.error?.message;
+
+  if (result.error || result.status !== 0) {
+    warn(detail || `Telemetry stamp failed (${kind}=${value})`);
+    return;
+  }
+
+  if (detail) {
+    warn(detail);
+  }
 }
 
 function finalizeSetupTelemetry(isFreshInstall: boolean): void {

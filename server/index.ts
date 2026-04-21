@@ -31,7 +31,11 @@ validateConfig();
 // ── Telemetry bootstrap marker for legacy installs ───────────────────
 // If there's no trusted fresh-install marker and no explicit NERVE_TELEMETRY_MODE,
 // mark this as a legacy upgrade so telemetry stays off by default.
-ensureLegacyUpgradeMarker({ envMode: process.env.NERVE_TELEMETRY_MODE });
+try {
+  ensureLegacyUpgradeMarker({ envMode: process.env.NERVE_TELEMETRY_MODE });
+} catch (err) {
+  console.warn('[telemetry] Failed to update bootstrap metadata:', (err as Error).message);
+}
 
 // ── Start file watchers ──────────────────────────────────────────────
 

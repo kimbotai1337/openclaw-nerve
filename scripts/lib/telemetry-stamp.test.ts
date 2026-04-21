@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,30 +10,57 @@ const STAMP_SCRIPT = path.resolve(import.meta.dirname, 'telemetry-stamp.mjs');
 
 describe('telemetry-stamp.mjs', () => {
   let tempDir: string;
+  let readOnlyDirs: string[];
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nerve-telemetry-stamp-'));
+    readOnlyDirs = [];
   });
 
   afterEach(() => {
+    for (const dir of readOnlyDirs) {
+      fs.chmodSync(dir, 0o700);
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function runStamp(...args: string[]): void {
-    execFileSync(process.execPath, [STAMP_SCRIPT, ...args, '--dir', tempDir], {
+  function runStampInDir(dir: string, ...args: string[]): void {
+    execFileSync(process.execPath, [STAMP_SCRIPT, ...args, '--dir', dir], {
       encoding: 'utf8',
       stdio: 'pipe',
     });
   }
 
-  function readStamp(kind: 'install-method' | 'bootstrap'): Record<string, unknown> | undefined {
+  function runStamp(...args: string[]): void {
+    runStampInDir(tempDir, ...args);
+  }
+
+  function runStampResult(dir: string, ...args: string[]) {
+    return spawnSync(process.execPath, [STAMP_SCRIPT, ...args, '--dir', dir], {
+      encoding: 'utf8',
+    });
+  }
+
+  function readStampFromDir(dir: string, kind: 'install-method' | 'bootstrap'): Record<string, unknown> | undefined {
     const fileName = kind === 'install-method' ? 'install-method.json' : 'bootstrap.json';
-    const filePath = path.join(tempDir, fileName);
+    const filePath = path.join(dir, fileName);
     try {
       return JSON.parse(fs.readFileSync(filePath, 'utf8'));
     } catch {
       return undefined;
     }
+  }
+
+  function readStamp(kind: 'install-method' | 'bootstrap'): Record<string, unknown> | undefined {
+    return readStampFromDir(tempDir, kind);
+  }
+
+  function makeReadOnlyDir(name: string): string {
+    const dir = path.join(tempDir, name);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o500);
+    readOnlyDirs.push(dir);
+    return dir;
   }
 
   describe('install-method stamping', () => {
@@ -71,6 +98,16 @@ describe('telemetry-stamp.mjs', () => {
       expect(current?.installMethod).toBe('release');
       expect(current?.stampedAt).toBe(original?.stampedAt);
     });
+
+    it('warns and exits successfully when install-method metadata cannot be written', () => {
+      const readOnlyDir = makeReadOnlyDir('readonly-install-method');
+
+      const result = runStampResult(readOnlyDir, 'install-method', 'release', '--source', 'install.sh');
+
+      expect(result.status).toBe(0);
+      expect(readStampFromDir(readOnlyDir, 'install-method')).toBeUndefined();
+      expect(result.stderr).toContain('Failed to write install-method.json');
+    });
   });
 
   describe('bootstrap stamping', () => {
@@ -100,11 +137,20 @@ describe('telemetry-stamp.mjs', () => {
       expect(current?.kind).toBe('fresh_install');
       expect(current?.stampedAt).toBe(original?.stampedAt);
     });
+
+    it('warns and exits successfully when bootstrap metadata cannot be written', () => {
+      const readOnlyDir = makeReadOnlyDir('readonly-bootstrap');
+
+      const result = runStampResult(readOnlyDir, 'bootstrap', 'fresh_install', '--source', 'install.sh');
+
+      expect(result.status).toBe(0);
+      expect(readStampFromDir(readOnlyDir, 'bootstrap')).toBeUndefined();
+      expect(result.stderr).toContain('Failed to write bootstrap.json');
+    });
   });
 
   describe('branch vs release provenance', () => {
     it('release install stamps install-method=release', () => {
-      // Simulates: TARGET_REF_KIND=release in install.sh
       runStamp('install-method', 'release', '--source', 'install.sh');
 
       const stamp = readStamp('install-method');
@@ -112,7 +158,6 @@ describe('telemetry-stamp.mjs', () => {
     });
 
     it('tagged version install stamps install-method=release', () => {
-      // Simulates: TARGET_REF_KIND=version in install.sh
       runStamp('install-method', 'release', '--source', 'install.sh');
 
       const stamp = readStamp('install-method');
@@ -120,7 +165,6 @@ describe('telemetry-stamp.mjs', () => {
     });
 
     it('branch install stamps install-method=source', () => {
-      // Simulates: TARGET_REF_KIND=branch in install.sh
       runStamp('install-method', 'source', '--source', 'install.sh');
 
       const stamp = readStamp('install-method');
@@ -128,7 +172,6 @@ describe('telemetry-stamp.mjs', () => {
     });
 
     it('branch-fallback install stamps install-method=source', () => {
-      // Simulates: TARGET_REF_KIND=branch-fallback in install.sh
       runStamp('install-method', 'source', '--source', 'install.sh');
 
       const stamp = readStamp('install-method');

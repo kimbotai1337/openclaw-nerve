@@ -126,7 +126,9 @@ repo_has_local_changes() {
 }
 
 stamp_telemetry() {
-  node scripts/lib/telemetry-stamp.mjs "$@"
+  if ! node scripts/lib/telemetry-stamp.mjs "$@"; then
+    warn "Telemetry stamp failed, continuing"
+  fi
 }
 
 write_env_with_writer() {
