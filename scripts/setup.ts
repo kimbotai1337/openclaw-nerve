@@ -127,11 +127,12 @@ function stampTelemetry(
 }
 
 function finalizeSetupTelemetry(isFreshInstall: boolean): void {
-  // Only stamp install-method=source on a fresh source install.
-  // Legacy installs (missing provenance) must remain unknown.
+  // Only confirmed fresh source installs should rewrite provenance.
+  // Legacy installs (missing provenance) must remain unknown, but a real
+  // fresh install should replace any stale global markers from older installs.
   if (isFreshInstall) {
-    stampTelemetry('install-method', 'source', { ifMissing: true, source: 'setup' });
-    stampTelemetry('bootstrap', 'fresh_install', { ifMissing: true, source: 'setup' });
+    stampTelemetry('install-method', 'source', { source: 'setup' });
+    stampTelemetry('bootstrap', 'fresh_install', { source: 'setup' });
   }
 }
 
@@ -152,13 +153,11 @@ async function resolveFreshInstall(hasExisting: boolean): Promise<boolean> {
     return false;
   }
 
-  if (hasBuildOutput()) {
-    return false;
-  }
-
   return confirm({
     theme: promptTheme,
-    message: 'No existing .env found. Is this a brand-new Nerve install?',
+    message: hasBuildOutput()
+      ? 'No existing .env found. Is this a brand-new Nerve install in this checkout?'
+      : 'No existing .env found. Is this a brand-new Nerve install?',
     default: false,
   });
 }

@@ -729,7 +729,7 @@ else
     stamp_telemetry install-method source --source install.sh
   fi
   if [[ "$IS_FRESH_INSTALL" == "true" ]]; then
-    stamp_telemetry bootstrap fresh_install --if-missing --source install.sh
+    stamp_telemetry bootstrap fresh_install --source install.sh
   fi
 fi
 

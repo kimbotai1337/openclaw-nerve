@@ -99,6 +99,16 @@ describe('telemetry-stamp.mjs', () => {
       expect(current?.stampedAt).toBe(original?.stampedAt);
     });
 
+    it('overwrites stale install-method metadata when --if-missing is omitted', () => {
+      runStamp('install-method', 'unknown', '--source', 'runtime');
+
+      runStamp('install-method', 'source', '--source', 'setup');
+
+      const current = readStamp('install-method');
+      expect(current?.installMethod).toBe('source');
+      expect(current?.source).toBe('setup');
+    });
+
     it('warns and exits successfully when install-method metadata cannot be written', () => {
       const readOnlyDir = makeReadOnlyDir('readonly-install-method');
 
@@ -136,6 +146,16 @@ describe('telemetry-stamp.mjs', () => {
       const current = readStamp('bootstrap');
       expect(current?.kind).toBe('fresh_install');
       expect(current?.stampedAt).toBe(original?.stampedAt);
+    });
+
+    it('overwrites stale bootstrap metadata when --if-missing is omitted', () => {
+      runStamp('bootstrap', 'upgrade_legacy', '--source', 'runtime');
+
+      runStamp('bootstrap', 'fresh_install', '--source', 'install.sh');
+
+      const current = readStamp('bootstrap');
+      expect(current?.kind).toBe('fresh_install');
+      expect(current?.source).toBe('install.sh');
     });
 
     it('warns and exits successfully when bootstrap metadata cannot be written', () => {
