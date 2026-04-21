@@ -81,6 +81,7 @@ const telemetryRuntimeMock = {
   recordToolCompleted: vi.fn(async () => undefined),
   markFeatureUsed: vi.fn(async () => undefined),
   markSessionSeen: vi.fn(async () => ({ firstSeen: false, sessionHash: 'sha256:test-session' })),
+  clearSessionSeen: vi.fn(async () => undefined),
   reportError: vi.fn(async () => undefined),
 };
 
@@ -199,6 +200,8 @@ describe('ws-proxy', () => {
     telemetryRuntimeMock.markFeatureUsed.mockResolvedValue(undefined);
     telemetryRuntimeMock.markSessionSeen.mockReset();
     telemetryRuntimeMock.markSessionSeen.mockResolvedValue({ firstSeen: false, sessionHash: 'sha256:test-session' });
+    telemetryRuntimeMock.clearSessionSeen.mockReset();
+    telemetryRuntimeMock.clearSessionSeen.mockResolvedValue(undefined);
     telemetryRuntimeMock.reportError.mockReset();
     telemetryRuntimeMock.reportError.mockResolvedValue(undefined);
     setTelemetryRuntime(telemetryRuntimeMock as unknown as TelemetryRuntime);
@@ -970,6 +973,7 @@ describe('ws-proxy', () => {
           deleteTranscript: true,
         });
         expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('sessions');
+        expect(telemetryRuntimeMock.clearSessionSeen).toHaveBeenCalledWith('agent:main:main');
       });
 
       ws.close();
@@ -1040,6 +1044,7 @@ describe('ws-proxy', () => {
       await vi.waitFor(() => {
         expect(mockedGatewayRpcCall).not.toHaveBeenCalled();
         expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('sessions');
+        expect(telemetryRuntimeMock.clearSessionSeen).toHaveBeenCalledWith('agent:main:main');
       });
 
       ws.close();

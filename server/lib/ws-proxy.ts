@@ -291,6 +291,15 @@ function createGatewayRelay(
     runInBackground(telemetry.markFeatureUsed('sessions'));
   }
 
+  function clearDeletedRootSession(sessionKey: string | undefined): void {
+    const telemetry = getTelemetryRuntime();
+    if (!telemetry || !isRootSessionKey(sessionKey)) {
+      return;
+    }
+
+    runInBackground(telemetry.clearSessionSeen(sessionKey));
+  }
+
   function recordToolCompleted(entry: PendingTool, success: boolean): void {
     const telemetry = getTelemetryRuntime();
     if (!telemetry) return;
@@ -327,6 +336,9 @@ function createGatewayRelay(
           }
           if (request.markSessionsFeatureUsedOnSuccess) {
             markSessionsFeatureUsed();
+          }
+          if (request.method === 'sessions.delete') {
+            clearDeletedRootSession(request.sessionKey);
           }
         }
       }
@@ -627,6 +639,9 @@ function createGatewayRelay(
               }
               if (requestChangesSessionLabel(method, params) || method === 'sessions.delete') {
                 markSessionsFeatureUsed();
+              }
+              if (method === 'sessions.delete') {
+                clearDeletedRootSession(extractSessionKey(params));
               }
             })
             .catch((err) => {

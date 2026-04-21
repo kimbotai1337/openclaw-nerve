@@ -60,6 +60,7 @@ export interface TelemetryStore {
   recordToolCompleted(input: RecordToolCompletedInput): Promise<void>;
   markFeatureUsed(feature: TelemetryFeatureName, at?: Date | string | number): Promise<void>;
   markSessionSeen(sessionKey: string): Promise<MarkSessionSeenResult>;
+  clearSessionSeen(sessionKey: string): Promise<void>;
   readWindow(now?: Date | string | number): Promise<TelemetryWindowSnapshot>;
   noteHeartbeatSent(input: NoteHeartbeatSentInput): Promise<void>;
 }
@@ -328,6 +329,17 @@ export function createTelemetryStore(options: TelemetryStoreOptions = {}): Telem
         }, nowIso);
 
         return { firstSeen, sessionHash: hash };
+      });
+    },
+
+    async clearSessionSeen(sessionKey) {
+      await enqueue(async () => {
+        const nowIso = new Date().toISOString();
+        const hash = sessionHash(sessionKey);
+
+        await update((state) => {
+          state.seenSessionHashes = state.seenSessionHashes.filter((entry) => entry !== hash);
+        }, nowIso);
       });
     },
 

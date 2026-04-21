@@ -715,13 +715,11 @@ else
       run_with_dots "Fetching tags" git fetch --tags origin -q
       run_with_dots "Checking out ${TARGET_REF}" git checkout --force "$TARGET_REF" -q
     fi
+    IS_FRESH_INSTALL=true
     ok "Cloned to ${INSTALL_DIR}"
   fi
 
   cd "$INSTALL_DIR"
-  if [[ ! -f .env ]]; then
-    IS_FRESH_INSTALL=true
-  fi
   # Stamp install-method based on ref kind:
   # - release/version → release (tagged version installs)
   # - branch/branch-fallback → source (dev/branch installs)
@@ -996,7 +994,7 @@ else
         if read -r answer < /dev/tty 2>/dev/null; then
           if [[ "$(echo "$answer" | tr "[:upper:]" "[:lower:]")" == "y" ]]; then
             echo ""
-            NERVE_INSTALLER=1 npm run setup < /dev/tty 2>/dev/null || {
+            NERVE_INSTALLER=1 NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup < /dev/tty 2>/dev/null || {
               warn "Setup wizard failed (no TTY?) — run ${CYAN}npm run setup${NC} manually"
             }
           else
@@ -1010,7 +1008,7 @@ else
       fi
     elif [[ -n "$ACCESS_MODE" ]]; then
       info "Explicit access mode requested — running non-interactive setup wizard..."
-      NERVE_INSTALLER=1 npm run setup -- --defaults --access-mode "$ACCESS_MODE" || {
+      NERVE_INSTALLER=1 NERVE_SETUP_FRESH_INSTALL="$([[ "$IS_FRESH_INSTALL" == "true" ]] && printf '1' || printf '0')" npm run setup -- --defaults --access-mode "$ACCESS_MODE" || {
         fail "Setup failed for --access-mode ${ACCESS_MODE}"
         exit 1
       }

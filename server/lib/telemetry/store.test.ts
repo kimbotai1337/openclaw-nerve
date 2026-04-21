@@ -74,6 +74,21 @@ describe('telemetry store', () => {
     expect(persisted).not.toContain('agent:main:main');
   });
 
+  it('allows a deleted root session key to be counted again after it is cleared', async () => {
+    const store = createTelemetryStore({ stateFile });
+
+    const first = await store.markSessionSeen('agent:main:main');
+    await store.clearSessionSeen('agent:main:main');
+    const second = await store.markSessionSeen('agent:main:main');
+
+    expect(first.firstSeen).toBe(true);
+    expect(second.firstSeen).toBe(true);
+
+    const persisted = fs.readFileSync(stateFile, 'utf8');
+    expect(persisted).toContain(first.sessionHash);
+    expect(persisted).not.toContain('agent:main:main');
+  });
+
   it('tracks heartbeat send metadata for future scheduling', async () => {
     const store = createTelemetryStore({ stateFile });
 

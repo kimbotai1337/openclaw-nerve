@@ -43,6 +43,9 @@ function createMemoryStore(): TelemetryStore {
     async markSessionSeen(sessionKey: string) {
       return { firstSeen: true, sessionHash: `sha256:${sessionKey}` };
     },
+    async clearSessionSeen() {
+      return;
+    },
     async readWindow() {
       return {
         ...snapshot,

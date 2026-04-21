@@ -60,6 +60,10 @@ function createMemoryStore(nowIso = '2026-04-21T00:05:00.000Z'): MemoryStoreCont
       };
     },
 
+    async clearSessionSeen() {
+      return;
+    },
+
     async readWindow(now) {
       if (now) {
         snapshot.windowEnd = new Date(now).toISOString();

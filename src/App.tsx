@@ -708,6 +708,8 @@ export default function App({ onLogout }: AppProps) {
     if (didSwitch) {
       maybeEmitBranchSwitchTelemetry(previousSessionKey, targetSessionKey);
     }
+
+    return didSwitch;
   }, [currentSession, getWorkspaceSwitchLabel, maybeEmitBranchSwitchTelemetry, requestWorkspaceTransition, sessions, spawnSession]);
 
   // Boot sequence: fade in panels when connected

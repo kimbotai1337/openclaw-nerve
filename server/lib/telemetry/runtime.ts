@@ -98,6 +98,7 @@ export interface TelemetryRuntime {
   recordClientDetailedEvent(input: RecordClientDetailedEventInput): Promise<void>;
   markFeatureUsed(feature: TelemetryFeatureName, at?: Date | string | number): Promise<void>;
   markSessionSeen(sessionKey: string): Promise<MarkSessionSeenResult>;
+  clearSessionSeen(sessionKey: string): Promise<void>;
   reportError(input: ReportTelemetryErrorInput): Promise<void>;
 }
 
@@ -470,6 +471,14 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
           sessionHash: '',
         };
       }
+    },
+
+    async clearSessionSeen(sessionKey) {
+      if (!telemetryEnabled()) {
+        return;
+      }
+
+      await runStoreWrite(() => store.clearSessionSeen(sessionKey));
     },
 
     async reportError(input) {
