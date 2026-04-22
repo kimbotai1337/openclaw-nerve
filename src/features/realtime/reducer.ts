@@ -2,6 +2,7 @@ import type {
   RealtimeEvent,
   RealtimeMessageEntity,
   RealtimeRunEntity,
+  RealtimeSnapshotPayload,
   RealtimeState,
 } from './types';
 
@@ -23,19 +24,60 @@ export function createInitialRealtimeState(): RealtimeState {
 
 function upsertRun(state: RealtimeState, run: RealtimeRunEntity) {
   const existing = state.runs[run.runId];
-  state.runs[run.runId] = existing
-    ? {
-        ...existing,
-        ...run,
-        messageIds: run.messageIds.length > 0 ? run.messageIds : existing.messageIds,
-      }
-    : run;
+  state.runs[run.runId] = existing ? { ...existing, ...run } : run;
+}
+
+function messageStatusPriority(status: RealtimeMessageEntity['status']) {
+  switch (status) {
+    case 'streaming':
+      return 0;
+    case 'committed':
+      return 1;
+    case 'superseded':
+      return 2;
+  }
 }
 
 function upsertMessage(state: RealtimeState, message: RealtimeMessageEntity) {
   const existing = state.messages[message.messageId];
-  if (!existing || message.revision >= existing.revision) {
+  if (!existing) {
     state.messages[message.messageId] = message;
+    return;
+  }
+
+  if (message.revision < existing.revision) return;
+  if (message.revision === existing.revision && messageStatusPriority(message.status) < messageStatusPriority(existing.status)) {
+    return;
+  }
+
+  state.messages[message.messageId] = message;
+}
+
+function replaceSnapshotSessionState(state: RealtimeState, snapshot: RealtimeSnapshotPayload) {
+  const sessionId = snapshot.session.sessionId;
+
+  for (const [runId, run] of Object.entries(state.runs)) {
+    if (run.sessionId === sessionId) delete state.runs[runId];
+  }
+
+  for (const [messageId, message] of Object.entries(state.messages)) {
+    if (message.sessionId === sessionId) delete state.messages[messageId];
+  }
+
+  delete state.agentPresence[sessionId];
+
+  state.sessions[sessionId] = snapshot.session;
+
+  for (const run of snapshot.runs) {
+    state.runs[run.runId] = run;
+  }
+
+  for (const message of snapshot.messages) {
+    state.messages[message.messageId] = message;
+  }
+
+  if (snapshot.agentPresence) {
+    state.agentPresence[sessionId] = snapshot.agentPresence;
   }
 }
 
@@ -84,7 +126,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
         runId: event.runId,
         sessionId: event.sessionId,
         status: 'queued',
-        messageIds: [],
+        messageIds: next.runs[event.runId]?.messageIds ?? [],
         lastEventAt: event.receivedAt,
         finalized: false,
       });
@@ -112,6 +154,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
         contentParts: [{ type: 'text', text: event.text }],
         status: 'streaming',
         revision: event.revision,
+        createdAt: next.messages[event.messageId]?.createdAt ?? event.receivedAt,
       });
       return next;
 
@@ -120,7 +163,10 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       if (event.message.runId) {
         const run = next.runs[event.message.runId];
         if (run && !run.messageIds.includes(event.message.messageId)) {
-          run.messageIds = [...run.messageIds, event.message.messageId];
+          next.runs[event.message.runId] = {
+            ...run,
+            messageIds: [...run.messageIds, event.message.messageId],
+          };
         }
       }
       return next;
@@ -130,12 +176,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       return next;
 
     case 'snapshot.loaded':
-      next.sessions[event.snapshot.session.sessionId] = event.snapshot.session;
-      for (const run of event.snapshot.runs) upsertRun(next, run);
-      for (const message of event.snapshot.messages) upsertMessage(next, message);
-      if (event.snapshot.agentPresence) {
-        next.agentPresence[event.snapshot.session.sessionId] = event.snapshot.agentPresence;
-      }
+      replaceSnapshotSessionState(next, event.snapshot);
       next.connection.reconcileNeeded = false;
       next.connection.status = 'live';
       next.connection.lastLiveAt = event.snapshot.recoveredAt;

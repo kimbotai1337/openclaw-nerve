@@ -11,7 +11,11 @@ export function selectRealtimeStatus(state: RealtimeState): RealtimeUiStatus {
 export function selectVisibleMessagesForSession(state: RealtimeState, sessionId: string): RealtimeMessageEntity[] {
   return Object.values(state.messages)
     .filter((message) => message.sessionId === sessionId && message.status !== 'superseded')
-    .sort((left, right) => left.revision - right.revision);
+    .sort((left, right) => {
+      if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+      if (left.revision !== right.revision) return left.revision - right.revision;
+      return left.messageId.localeCompare(right.messageId);
+    });
 }
 
 export function selectSessionAgentPresence(state: RealtimeState, sessionId: string) {

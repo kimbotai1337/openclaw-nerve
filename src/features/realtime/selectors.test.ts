@@ -21,6 +21,7 @@ describe('realtime selectors', () => {
       contentParts: [{ type: 'text', text: 'done' }],
       status: 'committed',
       revision: 2,
+      createdAt: 20,
     };
     state.messages['m-2'] = {
       messageId: 'm-2',
@@ -30,9 +31,58 @@ describe('realtime selectors', () => {
       contentParts: [{ type: 'text', text: 'hi' }],
       status: 'committed',
       revision: 1,
+      createdAt: 10,
     };
 
     const visible = selectVisibleMessagesForSession(state, 'agent:main:main');
     expect(visible.map((message) => message.messageId)).toEqual(['m-2', 'm-1']);
+  });
+
+  it('orders same-revision messages by createdAt with a deterministic tie-breaker', () => {
+    const state = createInitialRealtimeState();
+    state.messages['m-9'] = {
+      messageId: 'm-9',
+      sessionId: 'agent:main:main',
+      runId: 'run-1',
+      role: 'assistant',
+      contentParts: [{ type: 'text', text: 'third' }],
+      status: 'committed',
+      revision: 2,
+      createdAt: 30,
+    };
+    state.messages['m-3'] = {
+      messageId: 'm-3',
+      sessionId: 'agent:main:main',
+      runId: 'run-1',
+      role: 'assistant',
+      contentParts: [{ type: 'text', text: 'second' }],
+      status: 'committed',
+      revision: 2,
+      createdAt: 20,
+    };
+    state.messages['m-1'] = {
+      messageId: 'm-1',
+      sessionId: 'agent:main:main',
+      runId: 'run-1',
+      role: 'assistant',
+      contentParts: [{ type: 'text', text: 'first-a' }],
+      status: 'committed',
+      revision: 2,
+      createdAt: 10,
+    };
+    state.messages['m-2'] = {
+      messageId: 'm-2',
+      sessionId: 'agent:main:main',
+      runId: 'run-1',
+      role: 'assistant',
+      contentParts: [{ type: 'text', text: 'first-b' }],
+      status: 'committed',
+      revision: 2,
+      createdAt: 10,
+    };
+
+    const visible = selectVisibleMessagesForSession(state, 'agent:main:main');
+
+    expect(visible.map((message) => message.messageId)).toEqual(['m-1', 'm-2', 'm-3', 'm-9']);
   });
 });

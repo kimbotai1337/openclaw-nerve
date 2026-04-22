@@ -50,6 +50,7 @@ export interface RealtimeMessageEntity {
   contentParts: RealtimeMessagePart[];
   status: RealtimeMessageStatus;
   revision: number;
+  createdAt: number;
 }
 
 export interface RealtimeAgentPresence {
