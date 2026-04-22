@@ -1,7 +1,7 @@
 import type { ChatMessage, GatewayEvent } from '@/types';
 import {
   classifyStreamEvent,
-  extractFinalMessages,
+  extractFinalMessage,
   extractStreamDelta,
 } from '@/features/chat/operations';
 import type {
@@ -10,24 +10,8 @@ import type {
   RealtimeSnapshotPayload,
 } from './types';
 
-function nowFromGatewayEvent(event: GatewayEvent): number {
-  return typeof event.seq === 'number' ? event.seq : Date.now();
-}
-
-function extractMessageText(message: ChatMessage): string {
-  if (typeof message.text === 'string' && message.text.length > 0) return message.text;
-  if (typeof message.content === 'string') return message.content;
-  if (!Array.isArray(message.content)) return '';
-
-  return message.content
-    .filter((part) => part.type === 'text')
-    .map((part) => String(part.text || ''))
-    .join('');
-}
-
-function selectRenderableMessages(messages: ChatMessage[]): ChatMessage[] {
-  const assistantMessages = messages.filter((message) => message.role === 'assistant');
-  return assistantMessages.length > 0 ? assistantMessages : messages;
+function nowFromGatewayEvent(): number {
+  return Date.now();
 }
 
 function parseTimestamp(value: string | number | undefined): number | null {
@@ -41,13 +25,8 @@ function parseTimestamp(value: string | number | undefined): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function resolveCommittedCreatedAt(messages: ChatMessage[], fallback: number): number {
-  const renderableMessages = selectRenderableMessages(messages);
-  const timestamps = renderableMessages
-    .map((message) => parseTimestamp(message.createdAt ?? message.timestamp ?? message.ts))
-    .filter((value): value is number => value !== null);
-
-  return timestamps.length > 0 ? Math.min(...timestamps) : fallback;
+function resolveCommittedCreatedAt(message: ChatMessage, fallback: number): number {
+  return parseTimestamp(message.createdAt ?? message.timestamp ?? message.ts) ?? fallback;
 }
 
 function toCommittedMessage(
@@ -76,11 +55,9 @@ function deriveAgentPhase(event: ReturnType<typeof classifyStreamEvent>): string
   const agentState = event.agentPayload?.state || event.agentPayload?.agentState;
   if (typeof agentState === 'string' && agentState.length > 0) return agentState;
 
-  const lifecyclePhase = (event.agentPayload?.data as Record<string, unknown> | undefined)?.phase;
-  if (typeof lifecyclePhase === 'string' && lifecyclePhase.length > 0) return lifecyclePhase;
-
-  if (typeof event.agentPayload?.stream === 'string' && event.agentPayload.stream.length > 0) {
-    return event.agentPayload.stream;
+  if (event.type === 'lifecycle_start' || event.type === 'lifecycle_end') {
+    const lifecyclePhase = (event.agentPayload?.data as Record<string, unknown> | undefined)?.phase;
+    if (typeof lifecyclePhase === 'string' && lifecyclePhase.length > 0) return lifecyclePhase;
   }
 
   return null;
@@ -90,10 +67,13 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
   const classified = classifyStreamEvent(event);
   if (!classified?.sessionKey) return [];
 
-  const receivedAt = nowFromGatewayEvent(event);
+  const receivedAt = nowFromGatewayEvent();
   const sessionId = classified.sessionKey;
 
   if (classified.source === 'agent') {
+    const phase = deriveAgentPhase(classified);
+    if (!phase) return [];
+
     return [
       {
         type: 'agent.presence_updated',
@@ -104,7 +84,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
         presence: {
           sessionId,
           agentId: sessionId.split(':')[1] || null,
-          phase: deriveAgentPhase(classified),
+          phase,
           lastSeenAt: receivedAt,
         },
       },
@@ -156,12 +136,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
   }
 
   if (classified.type === 'chat_final' && classified.runId && classified.chatPayload) {
-    const finalMessages = extractFinalMessages(classified.chatPayload);
-    const renderableMessages = selectRenderableMessages(finalMessages);
-    const assistantText = renderableMessages
-      .map(extractMessageText)
-      .join('\n')
-      .trim();
+    const finalMessage = extractFinalMessage(classified.chatPayload);
     const runStatusEvent: RealtimeEvent = {
       type: 'run.status_changed',
       eventId: `chat:${receivedAt}:${classified.runId}:final`,
@@ -173,7 +148,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
       finalized: true,
     };
 
-    if (renderableMessages.length === 0) {
+    if (!finalMessage) {
       return [runStatusEvent];
     }
 
@@ -189,10 +164,40 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
           sessionId,
           classified.runId,
           `${classified.runId}:assistant`,
-          assistantText,
+          finalMessage.text,
           classified.chatSeq ?? receivedAt,
-          resolveCommittedCreatedAt(renderableMessages, receivedAt),
+          resolveCommittedCreatedAt(finalMessage.message, receivedAt),
         ),
+      },
+    ];
+  }
+
+  if (classified.type === 'chat_error' && classified.runId) {
+    return [
+      {
+        type: 'run.status_changed',
+        eventId: `chat:${receivedAt}:${classified.runId}:error`,
+        receivedAt,
+        source: 'live-chat',
+        sessionId,
+        runId: classified.runId,
+        status: 'failed',
+        finalized: true,
+      },
+    ];
+  }
+
+  if (classified.type === 'chat_aborted' && classified.runId) {
+    return [
+      {
+        type: 'run.status_changed',
+        eventId: `chat:${receivedAt}:${classified.runId}:aborted`,
+        receivedAt,
+        source: 'live-chat',
+        sessionId,
+        runId: classified.runId,
+        status: 'interrupted',
+        finalized: true,
       },
     ];
   }
