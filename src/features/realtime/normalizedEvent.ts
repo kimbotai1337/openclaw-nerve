@@ -29,6 +29,12 @@ function resolveCommittedCreatedAt(message: ChatMessage, fallback: number): numb
   return parseTimestamp(message.createdAt ?? message.timestamp ?? message.ts) ?? fallback;
 }
 
+function trimToNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function resolveMessageRevision(
   event: NonNullable<ReturnType<typeof classifyStreamEvent>>,
   receivedAt: number,
@@ -59,12 +65,14 @@ function toCommittedMessage(
 function deriveAgentPhase(event: ReturnType<typeof classifyStreamEvent>): string | null {
   if (!event || event.source !== 'agent') return null;
 
-  const agentState = event.agentPayload?.state || event.agentPayload?.agentState;
-  if (typeof agentState === 'string' && agentState.length > 0) return agentState;
+  const agentState = trimToNull(event.agentPayload?.state) ?? trimToNull(event.agentPayload?.agentState);
+  if (agentState) return agentState;
 
   if (event.type === 'lifecycle_start' || event.type === 'lifecycle_end') {
-    const lifecyclePhase = (event.agentPayload?.data as Record<string, unknown> | undefined)?.phase;
-    if (typeof lifecyclePhase === 'string' && lifecyclePhase.length > 0) return lifecyclePhase;
+    const lifecyclePhase = trimToNull(
+      (event.agentPayload?.data as Record<string, unknown> | undefined)?.phase,
+    );
+    if (lifecyclePhase) return lifecyclePhase;
   }
 
   return null;

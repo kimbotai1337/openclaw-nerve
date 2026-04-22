@@ -250,6 +250,22 @@ describe('extractFinalMessage', () => {
     expect(result).not.toBeNull();
     expect(result!.text).toContain('answer 2');
   });
+
+  it('strips tts and chart markers from final text while preserving metadata', () => {
+    const result = extractFinalMessage({
+      state: 'final',
+      message: {
+        role: 'assistant',
+        content: 'Summary [tts:Spoken summary] [chart:{"type":"bar","data":{"labels":["Q1"],"values":[1]}}]',
+      },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe('Summary');
+    expect(result!.ttsText).toBe('Spoken summary');
+    expect(result!.charts).toHaveLength(1);
+    expect(result!.charts[0]?.type).toBe('bar');
+  });
 });
 
 describe('buildActivityLogEntry', () => {

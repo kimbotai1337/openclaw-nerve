@@ -130,6 +130,22 @@ describe('normalized realtime events', () => {
     expect(normalizeGatewayEvent(event)).toEqual([]);
   });
 
+  it('does not emit presence updates for whitespace-only agent state values', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(45);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'agent',
+      seq: 10,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: '   ',
+      },
+    };
+
+    expect(normalizeGatewayEvent(event)).toEqual([]);
+  });
+
   it('creates a local run-created event from send acknowledgement', () => {
     const normalized = normalizeLocalRunCreated('agent:main:main', 'run-9', 100);
     expect(normalized).toEqual({
@@ -273,6 +289,58 @@ describe('normalized realtime events', () => {
           status: 'committed',
           revision: 12,
           createdAt: 150,
+        },
+      },
+    ]);
+  });
+
+  it('commits cleaned final text without tts or chart markers', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(221);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 8,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-clean-final',
+        seq: 13,
+        state: 'final',
+        message: {
+          role: 'assistant',
+          content:
+            'Summary [tts:Spoken summary] [chart:{"type":"bar","data":{"labels":["Q1"],"values":[1]}}]',
+          createdAt: 170,
+        },
+      },
+    };
+
+    expect(normalizeGatewayEvent(event)).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:221:run-clean-final:final',
+        receivedAt: 221,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-clean-final',
+        status: 'completed',
+        finalized: true,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'chat:221:run-clean-final:committed',
+        receivedAt: 221,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'run-clean-final:assistant',
+          sessionId: 'agent:main:main',
+          runId: 'run-clean-final',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'Summary' }],
+          status: 'committed',
+          revision: 13,
+          createdAt: 170,
         },
       },
     ]);

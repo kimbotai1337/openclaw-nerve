@@ -214,10 +214,10 @@ export function extractFinalMessage(chatPayload: ChatEventPayload): FinalMessage
   if (messages.length === 0) return null;
 
   const representative = [...messages].reverse().find(m => m.role === 'assistant') || messages[messages.length - 1];
-  const text = extractText(representative) || '';
-  const { ttsText } = extractTTSMarkers(text);
-  const { charts } = extractChartMarkers(text);
-  return { message: representative, text, ttsText, charts };
+  const rawText = extractText(representative) || '';
+  const { cleaned: ttsStripped, ttsText } = extractTTSMarkers(rawText);
+  const { cleaned, charts } = extractChartMarkers(ttsStripped);
+  return { message: representative, text: cleaned, ttsText, charts };
 }
 
 // ─── Activity log helpers ──────────────────────────────────────────────────────
