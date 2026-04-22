@@ -51,6 +51,36 @@ describe('normalized realtime events', () => {
     });
   });
 
+  it('uses frameSeq as message revision when chat seq is missing', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(140);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 41,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-frame',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'partial' }] },
+      },
+    };
+
+    const normalized = normalizeGatewayEvent(event);
+
+    expect(normalized).toMatchObject([
+      {
+        type: 'run.status_changed',
+        receivedAt: 140,
+      },
+      {
+        type: 'message.delta_applied',
+        receivedAt: 140,
+        revision: 41,
+      },
+    ]);
+  });
+
   it('maps an agent lifecycle event into presence update when a phase exists', () => {
     vi.spyOn(Date, 'now').mockReturnValue(30);
 
@@ -131,6 +161,63 @@ describe('normalized realtime events', () => {
     expect(normalized.type).toBe('snapshot.loaded');
   });
 
+  it('emits running status even when a delta payload is a string', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(180);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 50,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-string-delta',
+        state: 'delta',
+        message: 'raw text',
+      },
+    };
+
+    expect(normalizeGatewayEvent(event)).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:180:run-string-delta:delta',
+        receivedAt: 180,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-string-delta',
+        status: 'running',
+        finalized: false,
+      },
+    ]);
+  });
+
+  it('emits running status even when a delta payload has no extractable text', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(181);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 51,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-empty-delta',
+        state: 'delta',
+      },
+    };
+
+    expect(normalizeGatewayEvent(event)).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:181:run-empty-delta:delta',
+        receivedAt: 181,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-empty-delta',
+        status: 'running',
+        finalized: false,
+      },
+    ]);
+  });
+
   it('normalizes chat final using one representative assistant message', () => {
     vi.spyOn(Date, 'now').mockReturnValue(220);
 
@@ -187,6 +274,98 @@ describe('normalized realtime events', () => {
           revision: 12,
           createdAt: 150,
         },
+      },
+    ]);
+  });
+
+  it('keeps a frame-older late delta from overwriting a seq-less final commit', () => {
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValueOnce(260).mockReturnValueOnce(270);
+
+    const finalEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 20,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-out-of-order',
+        state: 'final',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          createdAt: 255,
+        },
+      },
+    };
+
+    const lateDeltaEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 19,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-out-of-order',
+        state: 'delta',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'stale partial' }],
+        },
+      },
+    };
+
+    const state = apply([
+      ...normalizeGatewayEvent(finalEvent),
+      ...normalizeGatewayEvent(lateDeltaEvent),
+    ]);
+
+    expect(state.runs['run-out-of-order']).toMatchObject({
+      status: 'completed',
+      finalized: true,
+      lastEventAt: 260,
+    });
+    expect(state.messages['run-out-of-order:assistant']).toEqual({
+      messageId: 'run-out-of-order:assistant',
+      sessionId: 'agent:main:main',
+      runId: 'run-out-of-order',
+      role: 'assistant',
+      contentParts: [{ type: 'text', text: 'done' }],
+      status: 'committed',
+      revision: 20,
+      createdAt: 255,
+    });
+  });
+
+  it('emits only terminal run status when final has no assistant message', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(280);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 60,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-no-assistant',
+        state: 'final',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'question only' }],
+            createdAt: 270,
+          },
+        ],
+      },
+    };
+
+    expect(normalizeGatewayEvent(event)).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:280:run-no-assistant:final',
+        receivedAt: 280,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-no-assistant',
+        status: 'completed',
+        finalized: true,
       },
     ]);
   });

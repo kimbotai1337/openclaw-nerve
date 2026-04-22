@@ -29,6 +29,13 @@ function resolveCommittedCreatedAt(message: ChatMessage, fallback: number): numb
   return parseTimestamp(message.createdAt ?? message.timestamp ?? message.ts) ?? fallback;
 }
 
+function resolveMessageRevision(
+  event: NonNullable<ReturnType<typeof classifyStreamEvent>>,
+  receivedAt: number,
+): number {
+  return event.chatSeq ?? event.frameSeq ?? receivedAt;
+}
+
 function toCommittedMessage(
   sessionId: string,
   runId: string | null,
@@ -108,9 +115,8 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
 
   if (classified.type === 'chat_delta' && classified.runId && classified.chatPayload) {
     const delta = extractStreamDelta(classified.chatPayload);
-    if (!delta) return [];
-
-    return [
+    const revision = resolveMessageRevision(classified, receivedAt);
+    const events: RealtimeEvent[] = [
       {
         type: 'run.status_changed',
         eventId: `chat:${receivedAt}:${classified.runId}:delta`,
@@ -121,7 +127,10 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
         status: 'running',
         finalized: false,
       },
-      {
+    ];
+
+    if (delta) {
+      events.push({
         type: 'message.delta_applied',
         eventId: `chat:${receivedAt}:${classified.runId}:message`,
         receivedAt,
@@ -130,13 +139,16 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
         runId: classified.runId,
         messageId: `${classified.runId}:assistant`,
         text: delta.cleaned,
-        revision: classified.chatSeq ?? receivedAt,
-      },
-    ];
+        revision,
+      });
+    }
+
+    return events;
   }
 
   if (classified.type === 'chat_final' && classified.runId && classified.chatPayload) {
     const finalMessage = extractFinalMessage(classified.chatPayload);
+    const revision = resolveMessageRevision(classified, receivedAt);
     const runStatusEvent: RealtimeEvent = {
       type: 'run.status_changed',
       eventId: `chat:${receivedAt}:${classified.runId}:final`,
@@ -148,7 +160,11 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
       finalized: true,
     };
 
-    if (!finalMessage) {
+    if (
+      !finalMessage ||
+      finalMessage.message.role !== 'assistant' ||
+      finalMessage.text.trim().length === 0
+    ) {
       return [runStatusEvent];
     }
 
@@ -165,7 +181,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
           classified.runId,
           `${classified.runId}:assistant`,
           finalMessage.text,
-          classified.chatSeq ?? receivedAt,
+          revision,
           resolveCommittedCreatedAt(finalMessage.message, receivedAt),
         ),
       },
