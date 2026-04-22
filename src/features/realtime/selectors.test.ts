@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialRealtimeState } from './reducer';
-import { selectRealtimeStatus, selectVisibleMessagesForSession } from './selectors';
+import { selectRealtimeStatus, selectSessionAgentPresence, selectVisibleMessagesForSession } from './selectors';
 
 describe('realtime selectors', () => {
   it('returns syncing when reconcile is in progress', () => {
@@ -84,5 +84,23 @@ describe('realtime selectors', () => {
     const visible = selectVisibleMessagesForSession(state, 'agent:main:main');
 
     expect(visible.map((message) => message.messageId)).toEqual(['m-1', 'm-2', 'm-3', 'm-9']);
+  });
+
+  it('returns agent presence for a session and null when it is absent', () => {
+    const state = createInitialRealtimeState();
+    state.agentPresence['agent:main:main'] = {
+      sessionId: 'agent:main:main',
+      agentId: 'main',
+      phase: 'running',
+      lastSeenAt: 10,
+    };
+
+    expect(selectSessionAgentPresence(state, 'agent:main:main')).toEqual({
+      sessionId: 'agent:main:main',
+      agentId: 'main',
+      phase: 'running',
+      lastSeenAt: 10,
+    });
+    expect(selectSessionAgentPresence(state, 'agent:other:other')).toBeNull();
   });
 });

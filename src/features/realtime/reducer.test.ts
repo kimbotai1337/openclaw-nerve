@@ -75,6 +75,14 @@ describe('realtimeReducer', () => {
   it('marks reconcile needed when ordering becomes uncertain', () => {
     const state = apply([
       {
+        type: 'connection.opened',
+        eventId: 'evt-0',
+        receivedAt: 20,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reconnectAttempt: 0,
+      },
+      {
         type: 'connection.reconcile_requested',
         eventId: 'evt-1',
         receivedAt: 30,
@@ -85,7 +93,7 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(state.connection.reconcileNeeded).toBe(true);
-    expect(state.connection.status).toBe('reconnecting');
+    expect(state.connection.status).toBe('live');
   });
 
   it('does not mutate the previous run entity when committing a message', () => {
@@ -294,5 +302,294 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(state.messages['assistant-1']).toEqual(committedMessage);
+  });
+
+  it('keeps transport health independent while reconciliation is pending', () => {
+    const snapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'running',
+        agentId: 'main',
+        updatedAt: 20,
+        sourceVersion: 'snapshot-transport',
+      },
+      runs: [],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 20,
+      source: 'server-reconcile',
+    };
+
+    const pendingState = apply([
+      {
+        type: 'connection.opened',
+        eventId: 'evt-1',
+        receivedAt: 1,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reconnectAttempt: 0,
+      },
+      {
+        type: 'connection.reconcile_requested',
+        eventId: 'evt-2',
+        receivedAt: 2,
+        source: 'local',
+        sessionId: 'agent:main:main',
+        reason: 'chat-gap',
+      },
+      {
+        type: 'connection.opened',
+        eventId: 'evt-3',
+        receivedAt: 3,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reconnectAttempt: 1,
+      },
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-4',
+        receivedAt: 4,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot,
+      },
+    ]);
+
+    expect(pendingState.connection.status).toBe('live');
+    expect(pendingState.connection.reconcileNeeded).toBe(true);
+    expect(pendingState.connection.lastLiveAt).toBe(3);
+
+    const mergedState = realtimeReducer(pendingState, {
+      type: 'snapshot.merge_completed',
+      eventId: 'evt-5',
+      receivedAt: 5,
+      source: 'snapshot',
+      sessionId: 'agent:main:main',
+    });
+
+    expect(mergedState.connection.status).toBe('live');
+    expect(mergedState.connection.reconcileNeeded).toBe(false);
+  });
+
+  it('does not let snapshot loading overwrite current transport status', () => {
+    const snapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'running',
+        agentId: 'main',
+        updatedAt: 20,
+        sourceVersion: 'snapshot-degraded',
+      },
+      runs: [],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 20,
+      source: 'server-reconcile',
+    };
+
+    const state = apply([
+      {
+        type: 'connection.opened',
+        eventId: 'evt-1',
+        receivedAt: 1,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reconnectAttempt: 0,
+      },
+      {
+        type: 'connection.degraded',
+        eventId: 'evt-2',
+        receivedAt: 2,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reason: 'slow-link',
+      },
+      {
+        type: 'connection.reconcile_requested',
+        eventId: 'evt-3',
+        receivedAt: 3,
+        source: 'local',
+        sessionId: 'agent:main:main',
+        reason: 'chat-gap',
+      },
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-4',
+        receivedAt: 4,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot,
+      },
+    ]);
+
+    expect(state.connection.status).toBe('degraded');
+    expect(state.connection.reconcileNeeded).toBe(true);
+    expect(state.connection.lastDisconnectReason).toBe('slow-link');
+  });
+
+  it('rejects a stale snapshot when local session activity is newer', () => {
+    const staleSnapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'idle',
+        agentId: 'main',
+        updatedAt: 20,
+        sourceVersion: 'v1',
+      },
+      runs: [
+        {
+          runId: 'run-1',
+          sessionId: 'agent:main:main',
+          status: 'queued',
+          messageIds: [],
+          lastEventAt: 20,
+          finalized: false,
+        },
+      ],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 30,
+      source: 'server-reconcile',
+    };
+
+    const state = apply([
+      {
+        type: 'session.upserted',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        session: {
+          sessionId: 'agent:main:main',
+          status: 'running',
+          agentId: 'main',
+          updatedAt: 20,
+          sourceVersion: 'v1',
+        },
+      },
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-2',
+        receivedAt: 40,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'running',
+        finalized: false,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'evt-3',
+        receivedAt: 41,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'assistant-live',
+          sessionId: 'agent:main:main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'still running' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 40,
+        },
+      },
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-4',
+        receivedAt: 42,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot: staleSnapshot,
+      },
+    ]);
+
+    expect(state.sessions['agent:main:main']?.status).toBe('running');
+    expect(state.runs['run-1']?.status).toBe('running');
+    expect(state.runs['run-1']?.lastEventAt).toBe(40);
+    expect(state.messages['assistant-live']?.messageId).toBe('assistant-live');
+  });
+
+  it('keeps finalized runs terminal and ignores duplicate run.created events', () => {
+    const state = apply([
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'completed',
+        finalized: true,
+      },
+      {
+        type: 'run.created',
+        eventId: 'evt-2',
+        receivedAt: 11,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+      },
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-3',
+        receivedAt: 12,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'running',
+        finalized: false,
+      },
+    ]);
+
+    expect(state.runs['run-1']).toEqual({
+      runId: 'run-1',
+      sessionId: 'agent:main:main',
+      status: 'completed',
+      messageIds: [],
+      lastEventAt: 10,
+      finalized: true,
+    });
+  });
+
+  it('creates a placeholder run when a committed message arrives before run events', () => {
+    const state = apply([
+      {
+        type: 'message.committed',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'assistant-1',
+          sessionId: 'agent:main:main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'hello' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 9,
+        },
+      },
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-2',
+        receivedAt: 11,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'running',
+        finalized: false,
+      },
+    ]);
+
+    expect(state.runs['run-1']).toEqual({
+      runId: 'run-1',
+      sessionId: 'agent:main:main',
+      status: 'running',
+      messageIds: ['assistant-1'],
+      lastEventAt: 11,
+      finalized: false,
+    });
   });
 });

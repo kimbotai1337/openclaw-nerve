@@ -53,6 +53,92 @@ function upsertMessage(state: RealtimeState, message: RealtimeMessageEntity) {
   state.messages[message.messageId] = message;
 }
 
+function getSessionStateWatermark(state: RealtimeState, sessionId: string) {
+  let watermark = state.sessions[sessionId]?.updatedAt ?? 0;
+
+  for (const run of Object.values(state.runs)) {
+    if (run.sessionId === sessionId && run.lastEventAt > watermark) watermark = run.lastEventAt;
+  }
+
+  for (const message of Object.values(state.messages)) {
+    if (message.sessionId === sessionId && message.createdAt > watermark) watermark = message.createdAt;
+  }
+
+  const presence = state.agentPresence[sessionId];
+  if (presence && presence.lastSeenAt > watermark) watermark = presence.lastSeenAt;
+
+  return watermark;
+}
+
+function getSnapshotWatermark(snapshot: RealtimeSnapshotPayload) {
+  let watermark = snapshot.session.updatedAt;
+
+  for (const run of snapshot.runs) {
+    if (run.lastEventAt > watermark) watermark = run.lastEventAt;
+  }
+
+  for (const message of snapshot.messages) {
+    if (message.createdAt > watermark) watermark = message.createdAt;
+  }
+
+  if (snapshot.agentPresence && snapshot.agentPresence.lastSeenAt > watermark) {
+    watermark = snapshot.agentPresence.lastSeenAt;
+  }
+
+  return watermark;
+}
+
+function hasSessionSlice(state: RealtimeState, sessionId: string) {
+  if (state.sessions[sessionId] || state.agentPresence[sessionId]) return true;
+  if (Object.values(state.runs).some((run) => run.sessionId === sessionId)) return true;
+  return Object.values(state.messages).some((message) => message.sessionId === sessionId);
+}
+
+function isFreshSnapshot(state: RealtimeState, snapshot: RealtimeSnapshotPayload) {
+  const sessionId = snapshot.session.sessionId;
+  if (!hasSessionSlice(state, sessionId)) return true;
+
+  const currentSession = state.sessions[sessionId];
+  const currentWatermark = getSessionStateWatermark(state, sessionId);
+  if (currentSession && snapshot.session.updatedAt < currentSession.updatedAt) return false;
+  if (snapshot.recoveredAt < currentWatermark) return false;
+
+  if (
+    currentSession &&
+    snapshot.session.updatedAt === currentSession.updatedAt &&
+    snapshot.session.sourceVersion === currentSession.sourceVersion &&
+    getSnapshotWatermark(snapshot) < currentWatermark
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function ensureRunForCommittedMessage(state: RealtimeState, message: RealtimeMessageEntity) {
+  if (!message.runId) return;
+
+  const run = state.runs[message.runId];
+  if (!run) {
+    state.runs[message.runId] = {
+      runId: message.runId,
+      sessionId: message.sessionId,
+      status: 'unknown',
+      messageIds: [message.messageId],
+      lastEventAt: message.createdAt,
+      finalized: false,
+    };
+    return;
+  }
+
+  if (run.messageIds.includes(message.messageId)) return;
+
+  state.runs[message.runId] = {
+    ...run,
+    messageIds: [...run.messageIds, message.messageId],
+  };
+}
+
 function replaceSnapshotSessionState(state: RealtimeState, snapshot: RealtimeSnapshotPayload) {
   const sessionId = snapshot.session.sessionId;
 
@@ -96,7 +182,6 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       next.connection.status = 'live';
       next.connection.lastLiveAt = event.receivedAt;
       next.connection.lastDisconnectReason = null;
-      next.connection.reconcileNeeded = false;
       next.connection.reconnectAttempt = event.reconnectAttempt;
       return next;
 
@@ -112,9 +197,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       return next;
 
     case 'connection.reconcile_requested':
-      next.connection.status = 'reconnecting';
       next.connection.reconcileNeeded = true;
-      next.connection.lastDisconnectReason = event.reason;
       return next;
 
     case 'session.upserted':
@@ -122,22 +205,30 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       return next;
 
     case 'run.created':
+      if (next.runs[event.runId]) return next;
+
       upsertRun(next, {
         runId: event.runId,
         sessionId: event.sessionId,
         status: 'queued',
-        messageIds: next.runs[event.runId]?.messageIds ?? [],
+        messageIds: [],
         lastEventAt: event.receivedAt,
         finalized: false,
       });
       return next;
 
     case 'run.status_changed':
+      if (next.runs[event.runId]?.finalized) return next;
+      if ((next.runs[event.runId]?.lastEventAt ?? -Infinity) > event.receivedAt) return next;
+
       upsertRun(next, {
         ...(next.runs[event.runId] ?? {
           runId: event.runId,
           sessionId: event.sessionId,
           messageIds: [],
+          status: 'unknown',
+          lastEventAt: 0,
+          finalized: false,
         }),
         status: event.status,
         lastEventAt: event.receivedAt,
@@ -160,31 +251,20 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
 
     case 'message.committed':
       upsertMessage(next, event.message);
-      if (event.message.runId) {
-        const run = next.runs[event.message.runId];
-        if (run && !run.messageIds.includes(event.message.messageId)) {
-          next.runs[event.message.runId] = {
-            ...run,
-            messageIds: [...run.messageIds, event.message.messageId],
-          };
-        }
-      }
+      ensureRunForCommittedMessage(next, event.message);
       return next;
 
     case 'agent.presence_updated':
-      next.agentPresence[event.sessionId] = event.presence;
+      next.agentPresence[event.presence.sessionId] = event.presence;
       return next;
 
     case 'snapshot.loaded':
+      if (!isFreshSnapshot(next, event.snapshot)) return next;
       replaceSnapshotSessionState(next, event.snapshot);
-      next.connection.reconcileNeeded = false;
-      next.connection.status = 'live';
-      next.connection.lastLiveAt = event.snapshot.recoveredAt;
       return next;
 
     case 'snapshot.merge_completed':
       next.connection.reconcileNeeded = false;
-      if (next.connection.status === 'reconnecting') next.connection.status = 'live';
       return next;
   }
 }
