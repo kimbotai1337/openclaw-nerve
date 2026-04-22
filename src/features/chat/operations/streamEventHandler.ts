@@ -1,7 +1,8 @@
 /**
- * streamEventHandler — Pure functions for classifying and processing streaming events.
+ * streamEventHandler — Pure parsing helpers for live gateway events.
  *
- * Extracted from ChatContext's subscribe callback. No React hooks, setState, or refs.
+ * This module stays focused on classifying raw frames and extracting payload data.
+ * Reducer-facing normalization belongs in the realtime layer.
  */
 import type {
   GatewayEvent,
