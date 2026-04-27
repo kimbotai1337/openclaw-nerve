@@ -135,19 +135,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const streamHook = useChatStreaming();
   const ttsHook = useChatTTS({ soundEnabled: soundEnabledRef, speak: speakRef });
 
-  const recoveryHook = useChatRecovery({
-    requestSnapshot,
-    currentSessionRef,
-    isGeneratingRef,
-    activeRunIdRef,
-    setStream: streamHook.setStream,
-  });
-
   const {
     loadHistory,
     getAllMessages,
     applyMessageWindow,
   } = msgHook;
+  const repairVisibleHistory = useCallback(async (sessionId: string) => {
+    await loadHistory(sessionId);
+  }, [loadHistory]);
+
+  const recoveryHook = useChatRecovery({
+    requestSnapshot,
+    repairVisibleHistory,
+    currentSessionRef,
+    isGeneratingRef,
+    activeRunIdRef,
+    setStream: streamHook.setStream,
+  });
   const {
     triggerRecovery,
     clearDisconnectState,

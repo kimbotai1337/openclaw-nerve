@@ -14,10 +14,12 @@ describe('useChatRecovery', () => {
 
   it('requests snapshot reconcile for reconnect recovery', async () => {
     const requestSnapshot = vi.fn(async () => {});
+    const repairVisibleHistory = vi.fn(async () => {});
 
     const { result } = renderHook(() =>
       useChatRecovery({
         requestSnapshot,
+        repairVisibleHistory,
         currentSessionRef: { current: 'agent:main:main' },
         isGeneratingRef: { current: true },
         activeRunIdRef: { current: 'run-1' },
@@ -34,6 +36,7 @@ describe('useChatRecovery', () => {
     });
 
     expect(requestSnapshot).toHaveBeenCalledWith('agent:main:main', 'reconnect');
+    expect(repairVisibleHistory).toHaveBeenCalledWith('agent:main:main');
   });
 
   it('maps unrenderable finals to a snapshot reconcile reason', async () => {
@@ -42,6 +45,7 @@ describe('useChatRecovery', () => {
     const { result } = renderHook(() =>
       useChatRecovery({
         requestSnapshot,
+        repairVisibleHistory: vi.fn(async () => {}),
         currentSessionRef: { current: 'agent:main:main' },
         isGeneratingRef: { current: true },
         activeRunIdRef: { current: 'run-1' },
@@ -62,10 +66,12 @@ describe('useChatRecovery', () => {
 
   it('drops stale pending recovery when the generation changes first', async () => {
     const requestSnapshot = vi.fn(async () => {});
+    const repairVisibleHistory = vi.fn(async () => {});
 
     const { result } = renderHook(() =>
       useChatRecovery({
         requestSnapshot,
+        repairVisibleHistory,
         currentSessionRef: { current: 'agent:main:main' },
         isGeneratingRef: { current: true },
         activeRunIdRef: { current: 'run-1' },
@@ -83,5 +89,6 @@ describe('useChatRecovery', () => {
     });
 
     expect(requestSnapshot).not.toHaveBeenCalled();
+    expect(repairVisibleHistory).not.toHaveBeenCalled();
   });
 });

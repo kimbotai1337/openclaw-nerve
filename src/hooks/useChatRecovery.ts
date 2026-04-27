@@ -22,6 +22,7 @@ interface RecoveryState {
 
 interface UseChatRecoveryDeps {
   requestSnapshot: (sessionId: string, reason: ReconcileReason) => Promise<void>;
+  repairVisibleHistory: (sessionId: string) => Promise<void>;
   currentSessionRef: React.RefObject<string>;
   isGeneratingRef: React.RefObject<boolean>;
   activeRunIdRef: React.RefObject<string | null>;
@@ -42,6 +43,7 @@ function toReconcileReason(reason: RecoveryReason): ReconcileReason {
 
 export function useChatRecovery({
   requestSnapshot,
+  repairVisibleHistory,
   currentSessionRef,
   isGeneratingRef,
   activeRunIdRef,
@@ -82,7 +84,12 @@ export function useChatRecovery({
 
       recoveryRef.current.inFlight = true;
       try {
-        await requestSnapshot(currentSessionRef.current, toReconcileReason(reason));
+        const sessionId = currentSessionRef.current;
+        await requestSnapshot(sessionId, toReconcileReason(reason));
+
+        if (capturedGeneration !== recoveryGenerationRef.current) return;
+
+        await repairVisibleHistory(sessionId);
 
         if (capturedGeneration !== recoveryGenerationRef.current) return;
       } catch (err) {
@@ -93,7 +100,7 @@ export function useChatRecovery({
         setStream(prev => ({ ...prev, isRecovering: false, recoveryReason: null }));
       }
     }, 180);
-  }, [clearRecoveryTimer, currentSessionRef, requestSnapshot, setStream]);
+  }, [clearRecoveryTimer, currentSessionRef, repairVisibleHistory, requestSnapshot, setStream]);
 
   /** Increment the recovery generation counter (invalidates in-flight recoveries). */
   const incrementGeneration = useCallback(() => {
