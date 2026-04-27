@@ -167,4 +167,38 @@ describe('RealtimeProvider', () => {
       expect(result.current.realtimeStatus).toBe('offline');
     });
   });
+
+  it('returns to offline after a live connection becomes terminally disconnected', async () => {
+    gatewayMockState.connectionState = 'connected';
+    gatewayMockState.transportMeta = {
+      lastCloseCode: null,
+      lastCloseReason: null,
+      connectedAt: 10,
+    };
+
+    const mod = await import('./RealtimeContext');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <mod.RealtimeProvider>{children}</mod.RealtimeProvider>
+    );
+
+    const { result, rerender } = renderHook(() => mod.useRealtime(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.state.connection.status).toBe('live');
+    });
+
+    gatewayMockState.connectionState = 'disconnected';
+    gatewayMockState.transportMeta = {
+      lastCloseCode: 1000,
+      lastCloseReason: 'intentional-close',
+      connectedAt: null,
+    };
+
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.state.connection.status).toBe('offline');
+      expect(result.current.realtimeStatus).toBe('offline');
+    });
+  });
 });

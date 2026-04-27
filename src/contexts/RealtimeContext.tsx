@@ -65,6 +65,17 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (connectionState === 'disconnected') {
+      dispatch({
+        type: 'connection.offline',
+        eventId: buildLocalEventId('connection-offline', 'global', receivedAt),
+        receivedAt,
+        source: 'local',
+        sessionId: 'global',
+        reason: transportMeta.lastCloseReason,
+      });
+    }
+
   }, [
     connectionState,
     reconnectAttempt,

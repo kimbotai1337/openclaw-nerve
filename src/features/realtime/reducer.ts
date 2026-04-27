@@ -185,6 +185,12 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       next.connection.reconnectAttempt = event.reconnectAttempt;
       return next;
 
+    case 'connection.offline':
+      next.connection.status = 'offline';
+      next.connection.lastDisconnectReason = event.reason;
+      next.connection.reconnectAttempt = 0;
+      return next;
+
     case 'connection.degraded':
       next.connection.status = 'degraded';
       next.connection.lastDisconnectReason = event.reason;

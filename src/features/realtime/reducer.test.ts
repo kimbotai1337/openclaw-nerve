@@ -96,6 +96,31 @@ describe('realtimeReducer', () => {
     expect(state.connection.status).toBe('live');
   });
 
+  it('returns to offline when the transport reaches a terminal disconnect', () => {
+    const state = apply([
+      {
+        type: 'connection.opened',
+        eventId: 'evt-0',
+        receivedAt: 20,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reconnectAttempt: 0,
+      },
+      {
+        type: 'connection.offline',
+        eventId: 'evt-1',
+        receivedAt: 30,
+        source: 'local',
+        sessionId: 'agent:main:main',
+        reason: 'intentional-close',
+      },
+    ]);
+
+    expect(state.connection.status).toBe('offline');
+    expect(state.connection.lastDisconnectReason).toBe('intentional-close');
+    expect(state.connection.reconnectAttempt).toBe(0);
+  });
+
   it('does not mutate the previous run entity when committing a message', () => {
     const baseState = apply([
       {

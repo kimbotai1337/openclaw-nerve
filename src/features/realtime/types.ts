@@ -91,6 +91,7 @@ interface RealtimeEventBase {
 
 export type RealtimeEvent =
   | (RealtimeEventBase & { type: 'connection.opened'; reconnectAttempt: number })
+  | (RealtimeEventBase & { type: 'connection.offline'; reason: string | null })
   | (RealtimeEventBase & { type: 'connection.degraded'; reason: string })
   | (RealtimeEventBase & { type: 'connection.closed'; reason: string; reconnectAttempt: number })
   | (RealtimeEventBase & { type: 'connection.reconcile_requested'; reason: ReconcileReason })
