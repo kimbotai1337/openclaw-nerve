@@ -33,7 +33,14 @@ function normalizePresencePhase(phase: string | null | undefined): string | null
 }
 
 function getLatestRunForSession(
-  runs: Record<string, { runId: string; sessionId: string; lastEventAt: number; finalized: boolean; status: string }>,
+  runs: Record<string, {
+    runId: string;
+    sessionId: string;
+    lastEventAt: number;
+    finalized: boolean;
+    status: string;
+    messageIds: string[];
+  }>,
   sessionKey: string,
 ) {
   let latestRun: (typeof runs)[string] | null = null;

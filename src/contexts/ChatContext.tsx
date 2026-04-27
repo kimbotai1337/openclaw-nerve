@@ -30,6 +30,7 @@ import {
   processChatMessages,
   buildUserMessage,
   sendChatMessage,
+  loadChatHistory,
   classifyStreamEvent,
   extractStreamDelta,
   extractFinalMessage,
