@@ -720,6 +720,12 @@ else
   fi
 
   cd "$INSTALL_DIR"
+  # An existing checkout without a configured .env is still a first-time install
+  # for setup defaults and telemetry bootstrap purposes.
+  if [[ "$IS_FRESH_INSTALL" != "true" && ! -f .env ]]; then
+    IS_FRESH_INSTALL=true
+  fi
+
   # Stamp install-method based on ref kind:
   # - release/version → release (tagged version installs)
   # - branch/branch-fallback → source (dev/branch installs)

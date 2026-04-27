@@ -132,15 +132,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUnreadSessionKeys(next);
   }, []);
 
-  const setCurrentSession = useCallback((key: string) => {
+  const applyCurrentSession = useCallback((key: string, options?: { emitTelemetry?: boolean }) => {
     const previousKey = currentSessionRef.current;
     currentSessionRef.current = key;
     setCurrentSessionRaw(key);
     markSessionRead(key);
-    if (previousKey && key && previousKey !== key) {
+    if (options?.emitTelemetry !== false && previousKey && key && previousKey !== key) {
       void emitSessionOpened();
     }
   }, [markSessionRead]);
+
+  const setCurrentSession = useCallback((key: string) => {
+    applyCurrentSession(key, { emitTelemetry: true });
+  }, [applyCurrentSession]);
 
   const fetchHiddenCronSessions = useCallback(async (activeMinutes: number, limit: number): Promise<Session[]> => {
     try {
@@ -631,13 +635,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // If nothing changed, return the same array reference
         return hasChanges ? merged : prev;
       });
-      setCurrentSession(nextCurrentSession);
+      applyCurrentSession(nextCurrentSession, { emitTelemetry: false });
     } catch (err) {
       console.debug('[SessionContext] Failed to refresh sessions:', err);
     } finally {
       setSessionsLoading(false);
     }
-  }, [connectionState, listAuthoritativeSessions, setCurrentSession]);
+  }, [applyCurrentSession, connectionState, listAuthoritativeSessions]);
 
   const refreshSessionsRef = useRef(refreshSessions);
   useEffect(() => {
@@ -877,9 +881,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setUnreadSessionKeys(next);
     }
     if (shouldReplaceCurrent) {
-      setCurrentSession(nextCurrentSession);
+      applyCurrentSession(nextCurrentSession, { emitTelemetry: false });
     }
-  }, [findDescendantSessionKeys, listAuthoritativeSessions, rpc, setCurrentSession]);
+  }, [applyCurrentSession, findDescendantSessionKeys, listAuthoritativeSessions, rpc]);
 
   const spawnSession = useCallback(async (opts: SpawnSessionOpts) => {
     const authoritativeSessions = await listAuthoritativeSessions();

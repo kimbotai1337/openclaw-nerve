@@ -1,7 +1,13 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { buildHeartbeatPayload, nextDailyHeartbeatAt, shouldSendFirstSeen, shouldSendVersionChange } from './heartbeat.js';
+import {
+  buildHeartbeatPayload,
+  nextDailyHeartbeatAt,
+  shouldSendDailyCatchUp,
+  shouldSendFirstSeen,
+  shouldSendVersionChange,
+} from './heartbeat.js';
 
 describe('telemetry heartbeat helpers', () => {
   it('builds a daily heartbeat payload with exact active_24h semantics', () => {
@@ -47,6 +53,26 @@ describe('telemetry heartbeat helpers', () => {
     expect(shouldSendVersionChange({ appVersion: '1.5.2' })).toBe(false);
     expect(shouldSendVersionChange({ appVersion: '1.5.2', lastHeartbeatAppVersion: '1.5.1' })).toBe(true);
     expect(shouldSendVersionChange({ appVersion: '1.5.2', lastHeartbeatAppVersion: '1.5.2' })).toBe(false);
+  });
+
+  it('sends a startup daily catch-up only after the UTC daily target has passed', () => {
+    expect(shouldSendDailyCatchUp({
+      now: new Date('2026-04-21T00:05:00Z'),
+      jitterMs: 10 * 60 * 1000,
+      lastHeartbeatSentAtByReason: {},
+    })).toBe(false);
+
+    expect(shouldSendDailyCatchUp({
+      now: new Date('2026-04-21T12:00:00Z'),
+      jitterMs: 10 * 60 * 1000,
+      lastHeartbeatSentAtByReason: {},
+    })).toBe(true);
+
+    expect(shouldSendDailyCatchUp({
+      now: new Date('2026-04-21T12:00:00Z'),
+      jitterMs: 10 * 60 * 1000,
+      lastHeartbeatSentAtByReason: { daily: '2026-04-21T00:10:00.000Z' },
+    })).toBe(false);
   });
 
   it('schedules the next daily heartbeat at the next UTC day target with jitter', () => {

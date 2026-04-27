@@ -8,7 +8,13 @@ import {
   type DetailedEventSurface,
 } from './detailed-events.js';
 import { buildErrorPayload } from './error-reporting.js';
-import { buildHeartbeatPayload, nextDailyHeartbeatAt, shouldSendFirstSeen, shouldSendVersionChange } from './heartbeat.js';
+import {
+  buildHeartbeatPayload,
+  nextDailyHeartbeatAt,
+  shouldSendDailyCatchUp,
+  shouldSendFirstSeen,
+  shouldSendVersionChange,
+} from './heartbeat.js';
 import {
   ensureInstanceId,
   ensureLegacyUpgradeMarker,
@@ -307,21 +313,31 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
       return;
     }
 
-    const snapshot = await store.readWindow(now());
+    const sentAt = now();
+    const snapshot = await store.readWindow(sentAt);
     if (stopped) {
       return;
     }
 
     if (shouldSendFirstSeen(snapshot.lastHeartbeatSentAtByReason)) {
-      await sendHeartbeat('first_seen', now());
-      return;
-    }
-
-    if (shouldSendVersionChange({
+      await sendHeartbeat('first_seen', sentAt);
+    } else if (shouldSendVersionChange({
       appVersion: options.appVersion,
       lastHeartbeatAppVersion: snapshot.lastHeartbeatAppVersion,
     })) {
-      await sendHeartbeat('version_change', now());
+      await sendHeartbeat('version_change', sentAt);
+    }
+
+    if (stopped) {
+      return;
+    }
+
+    if (shouldSendDailyCatchUp({
+      now: sentAt,
+      jitterMs: dailyJitterMs,
+      lastHeartbeatSentAtByReason: snapshot.lastHeartbeatSentAtByReason,
+    })) {
+      await sendHeartbeat('daily', sentAt);
     }
   }
 

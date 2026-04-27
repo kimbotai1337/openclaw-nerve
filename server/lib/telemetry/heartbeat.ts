@@ -55,6 +55,34 @@ export function shouldSendVersionChange(params: {
   return !!params.lastHeartbeatAppVersion && params.lastHeartbeatAppVersion !== params.appVersion;
 }
 
+export function shouldSendDailyCatchUp(params: {
+  now: Date;
+  jitterMs: number;
+  lastHeartbeatSentAtByReason: Partial<Record<HeartbeatReason, string>>;
+}): boolean {
+  const todayTarget = Date.UTC(
+    params.now.getUTCFullYear(),
+    params.now.getUTCMonth(),
+    params.now.getUTCDate(),
+  ) + Math.max(0, params.jitterMs);
+
+  if (params.now.getTime() < todayTarget) {
+    return false;
+  }
+
+  const lastDailySentAt = params.lastHeartbeatSentAtByReason.daily;
+  if (!lastDailySentAt) {
+    return true;
+  }
+
+  const lastDailyTime = new Date(lastDailySentAt).getTime();
+  if (Number.isNaN(lastDailyTime)) {
+    return true;
+  }
+
+  return lastDailyTime < todayTarget;
+}
+
 export function nextDailyHeartbeatAt(now: Date, jitterMs: number): Date {
   const current = now.getTime();
   const currentUtcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());

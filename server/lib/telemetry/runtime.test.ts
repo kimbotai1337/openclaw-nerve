@@ -306,6 +306,34 @@ describe('telemetry runtime', () => {
     await runtime.stop();
   });
 
+  it('sends a catch-up daily heartbeat on startup after the daily target has passed', async () => {
+    const { store, snapshot } = createMemoryStore();
+    snapshot.lastHeartbeatSentAtByReason.first_seen = '2026-04-20T00:00:00.000Z';
+    snapshot.lastHeartbeatSentAtByReason.daily = '2026-04-20T00:10:00.000Z';
+    snapshot.lastHeartbeatAppVersion = '1.5.2';
+
+    const postJson = vi.fn().mockResolvedValue(true);
+    const runtime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: 'minimal',
+      store,
+      transport: { postJson },
+      metadata: createMetadata('minimal', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T12:00:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await runtime.start();
+    await flushAsyncWork();
+
+    expect(postJson).toHaveBeenCalledTimes(1);
+    expect(postJson.mock.calls[0]?.[1]).toMatchObject({ reason: 'daily' });
+    expect(snapshot.lastHeartbeatSentAtByReason.daily).toBe('2026-04-21T12:00:00.000Z');
+
+    await runtime.stop();
+  });
+
   it('retries startup heartbeats until delivery is confirmed', async () => {
     const { store, snapshot } = createMemoryStore();
 

@@ -77,12 +77,18 @@ function SessionDisplayLabels() {
 }
 
 function SessionRefreshProbe() {
-  const { refreshSessions } = useSessionContext();
+  const { currentSession, refreshSessions, setCurrentSession } = useSessionContext();
 
   return (
-    <button data-testid="refresh-sessions" onClick={() => void refreshSessions()}>
-      Refresh sessions
-    </button>
+    <div>
+      <div data-testid="current-session">{currentSession}</div>
+      <button data-testid="refresh-sessions" onClick={() => void refreshSessions()}>
+        Refresh sessions
+      </button>
+      <button data-testid="select-reviewer" onClick={() => setCurrentSession('agent:reviewer:main')}>
+        Select reviewer
+      </button>
+    </div>
   );
 }
 
@@ -258,6 +264,54 @@ describe('SessionContext', () => {
     await waitFor(() => {
       expect(screen.getByTestId('current-session').textContent).toBe('');
     });
+    expect(telemetryClientMocks.emitSessionOpened).not.toHaveBeenCalled();
+  });
+
+  it('does not emit session_opened when refreshSessions falls back after the current session disappears', async () => {
+    let sessionsListCalls = 0;
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        sessionsListCalls += 1;
+        return sessionsListCalls >= 2
+          ? {
+              sessions: [
+                { sessionKey: 'agent:main:main', label: 'Main' },
+              ],
+            }
+          : {
+              sessions: [
+                { sessionKey: 'agent:main:main', label: 'Main' },
+                { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+              ],
+            };
+      }
+      return {};
+    });
+
+    render(<SessionProvider><SessionRefreshProbe /></SessionProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:main:main');
+    });
+
+    await act(async () => {
+      screen.getByTestId('select-reviewer').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:reviewer:main');
+    });
+
+    telemetryClientMocks.emitSessionOpened.mockClear();
+
+    await act(async () => {
+      screen.getByTestId('refresh-sessions').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:main:main');
+    });
+
     expect(telemetryClientMocks.emitSessionOpened).not.toHaveBeenCalled();
   });
 
