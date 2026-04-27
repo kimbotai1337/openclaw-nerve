@@ -137,7 +137,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     currentSessionRef.current = key;
     setCurrentSessionRaw(key);
     markSessionRead(key);
-    if (previousKey && previousKey !== key) {
+    if (previousKey && key && previousKey !== key) {
       void emitSessionOpened();
     }
   }, [markSessionRead]);

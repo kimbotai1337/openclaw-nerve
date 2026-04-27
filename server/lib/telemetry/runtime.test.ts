@@ -444,6 +444,41 @@ describe('telemetry runtime', () => {
     expect(scheduler.clearTimeoutFn).toHaveBeenCalled();
   });
 
+  it('skips startup heartbeats that finish reading after stop is called', async () => {
+    const { store: baseStore } = createMemoryStore();
+    const baseReadWindow = baseStore.readWindow.bind(baseStore);
+    let releaseReadWindow: (() => void) | undefined;
+
+    const store: TelemetryStore = {
+      ...baseStore,
+      async readWindow(now) {
+        await new Promise<void>((resolve) => {
+          releaseReadWindow = resolve;
+        });
+        return baseReadWindow(now);
+      },
+    };
+
+    const postJson = vi.fn().mockResolvedValue(true);
+    const runtime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: 'minimal',
+      store,
+      transport: { postJson },
+      metadata: createMetadata('minimal', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T00:05:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await runtime.start();
+    await runtime.stop();
+    releaseReadWindow?.();
+    await flushAsyncWork();
+
+    expect(postJson).not.toHaveBeenCalled();
+  });
+
   it('discloses telemetry mode and fresh-install notice state for server info', async () => {
     const { store } = createMemoryStore();
     const runtime = createTelemetryRuntime({

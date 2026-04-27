@@ -234,12 +234,16 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
   }
 
   async function sendHeartbeat(reason: HeartbeatReason, sentAt = now()): Promise<void> {
-    if (mode === 'off' || !instanceId) {
+    if (mode === 'off' || !instanceId || stopped) {
       return;
     }
 
     try {
       const snapshot = await store.readWindow(sentAt);
+      if (stopped) {
+        return;
+      }
+
       const payload = buildHeartbeatPayload({
         identity: { instanceId },
         installMethod,
@@ -299,11 +303,14 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
   }
 
   async function sendStartupHeartbeats(): Promise<void> {
-    if (mode === 'off') {
+    if (mode === 'off' || stopped) {
       return;
     }
 
     const snapshot = await store.readWindow(now());
+    if (stopped) {
+      return;
+    }
 
     if (shouldSendFirstSeen(snapshot.lastHeartbeatSentAtByReason)) {
       await sendHeartbeat('first_seen', now());

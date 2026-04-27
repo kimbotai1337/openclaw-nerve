@@ -115,7 +115,7 @@ function stampTelemetry(
     env: process.env,
     encoding: 'utf8',
   });
-  const detail = result.stderr.trim() || result.stdout.trim() || result.error?.message;
+  const detail = (result.stderr ?? '').trim() || (result.stdout ?? '').trim() || result.error?.message;
 
   if (result.error || result.status !== 0) {
     warn(detail || `Telemetry stamp failed (${kind}=${value})`);

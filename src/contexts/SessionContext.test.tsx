@@ -96,6 +96,9 @@ function SessionUnreadProbe() {
       <button data-testid="select-reviewer" onClick={() => setCurrentSession('agent:reviewer:main')}>
         Select reviewer
       </button>
+      <button data-testid="clear-session" onClick={() => setCurrentSession('')}>
+        Clear session
+      </button>
     </div>
   );
 }
@@ -238,6 +241,24 @@ describe('SessionContext', () => {
       expect(screen.getByTestId('current-session').textContent).toBe('agent:reviewer:main');
     });
     expect(telemetryClientMocks.emitSessionOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not emit session_opened when clearing the current session', async () => {
+    render(<SessionProvider><SessionUnreadProbe /></SessionProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:main:main');
+    });
+    telemetryClientMocks.emitSessionOpened.mockClear();
+
+    await act(async () => {
+      screen.getByTestId('clear-session').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('');
+    });
+    expect(telemetryClientMocks.emitSessionOpened).not.toHaveBeenCalled();
   });
 
   it('emits branch_created after a new top-level root agent is created', async () => {

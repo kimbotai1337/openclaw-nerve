@@ -191,6 +191,7 @@ app.get('/api/language', rateLimitGeneral, (c) => {
 app.put('/api/language', rateLimitGeneral, async (c) => {
   try {
     const body = await c.req.json() as { language?: string; edgeVoiceGender?: string };
+    let updated = false;
 
     if (body.language !== undefined) {
       const lang = body.language;
@@ -199,6 +200,7 @@ app.put('/api/language', rateLimitGeneral, async (c) => {
       }
       updateConfig('language', lang);
       await writeEnvKey('NERVE_LANGUAGE', lang);
+      updated = true;
     }
 
     if (body.edgeVoiceGender !== undefined) {
@@ -208,6 +210,11 @@ app.put('/api/language', rateLimitGeneral, async (c) => {
       }
       updateConfig('edgeVoiceGender', gender);
       await writeEnvKey('EDGE_VOICE_GENDER', gender);
+      updated = true;
+    }
+
+    if (updated) {
+      markSettingsFeatureUsed();
     }
 
     return c.json({
