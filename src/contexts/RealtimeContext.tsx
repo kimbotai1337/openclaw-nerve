@@ -100,6 +100,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       sessionId,
       reason,
     });
+    console.debug('[realtime] snapshot requested', {
+      sessionId,
+      reason,
+      startedAt: requestedAt,
+    });
 
     try {
       const response = await fetch(`/api/realtime/snapshot?sessionKey=${encodeURIComponent(sessionId)}`);
@@ -120,6 +125,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         source: 'local',
         sessionId,
       });
+      console.debug('[realtime] snapshot merged', {
+        sessionId,
+        reason,
+        durationMs: Date.now() - requestedAt,
+      });
     } catch (error) {
       dispatch({
         type: 'connection.degraded',
@@ -128,6 +138,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         source: 'local',
         sessionId,
         reason: error instanceof Error ? error.message : 'snapshot-request-failed',
+      });
+      console.debug('[realtime] snapshot failed', {
+        sessionId,
+        reason,
+        durationMs: Date.now() - requestedAt,
+        error: error instanceof Error ? error.message : 'snapshot-request-failed',
       });
       throw error;
     }

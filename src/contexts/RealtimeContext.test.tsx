@@ -6,6 +6,16 @@ import type { RealtimeSnapshotPayload } from '@/features/realtime/types';
 
 let subscribedHandler: ((event: GatewayEvent) => void) | null = null;
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 const gatewayMockState = {
   connectionState: 'connected' as const,
   reconnectAttempt: 0,
@@ -115,6 +125,70 @@ describe('RealtimeProvider', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/realtime/snapshot?sessionKey=agent%3Amain%3Amain');
     expect(result.current.state.sessions['agent:main:main']).toEqual(snapshot.session);
     expect(result.current.state.connection.reconcileNeeded).toBe(false);
+    expect(result.current.realtimeStatus).toBe('live');
+  });
+
+  it('logs snapshot request and merge details while reconcile is pending', async () => {
+    const snapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'idle',
+        agentId: 'main',
+        updatedAt: 30,
+        sourceVersion: 'snapshot-2',
+      },
+      runs: [],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 31,
+      source: 'server-reconcile',
+    };
+
+    const deferred = createDeferred<SnapshotResponse>();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => deferred.promise,
+    }));
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mod = await import('./RealtimeContext');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <mod.RealtimeProvider>{children}</mod.RealtimeProvider>
+    );
+
+    const { result } = renderHook(() => mod.useRealtime(), { wrapper });
+
+    let requestPromise!: Promise<void>;
+    await act(async () => {
+      requestPromise = result.current.requestSnapshot('agent:main:main', 'reconnect');
+      await Promise.resolve();
+    });
+
+    expect(result.current.realtimeStatus).toBe('syncing');
+    expect(debugSpy).toHaveBeenCalledWith(
+      '[realtime] snapshot requested',
+      expect.objectContaining({
+        sessionId: 'agent:main:main',
+        reason: 'reconnect',
+        startedAt: expect.any(Number),
+      }),
+    );
+
+    deferred.resolve({ ok: true, snapshot });
+
+    await act(async () => {
+      await requestPromise;
+    });
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      '[realtime] snapshot merged',
+      expect.objectContaining({
+        sessionId: 'agent:main:main',
+        reason: 'reconnect',
+        durationMs: expect.any(Number),
+      }),
+    );
     expect(result.current.realtimeStatus).toBe('live');
   });
 

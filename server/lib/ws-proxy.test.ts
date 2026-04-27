@@ -816,6 +816,29 @@ describe('ws-proxy observability', () => {
     logSpy.mockRestore();
   });
 
+  it('logs close reason and retry mode for a proxied websocket connection', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${proxyPort2}/ws?target=${encodeURIComponent(mockGw2.url + '/ws')}`,
+    );
+
+    await waitForMessage(ws);
+    mockGw2.disconnectAll(1012, 'gateway-restart');
+    await waitForClose(ws);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(
+      logSpy.mock.calls.some(([line]) =>
+        typeof line === 'string'
+        && line.includes('phase=gateway-close')
+        && line.includes('closeReason=gateway-restart')
+        && line.includes('hasRetried=false'),
+      ),
+    ).toBe(true);
+
+    logSpy.mockRestore();
+  });
+
   it('uses unique connection IDs for concurrent connections', async () => {
     const logSpy = vi.spyOn(console, 'log');
 

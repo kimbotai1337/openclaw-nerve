@@ -194,6 +194,63 @@ describe('useWebSocket', () => {
       expect(result.current.transportMeta.lastCloseReason).toBe('gateway-restart');
       expect(result.current.connectionState).toBe('reconnecting');
     });
+
+    it('clears stale close metadata after reconnect auth succeeds', async () => {
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      const { result } = renderHook(() => useWebSocket());
+
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token');
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const firstWs = wsInstances[0];
+      act(() => {
+        firstWs.simulateMessage({ type: 'event', event: 'connect.challenge', payload: { nonce: 'first' } });
+      });
+
+      const firstConnectReq = getConnectRequest(firstWs);
+      expect(firstConnectReq).toBeTruthy();
+
+      act(() => {
+        firstWs.simulateMessage({ type: 'res', id: firstConnectReq?.id, ok: true, payload: {} });
+      });
+
+      act(() => {
+        firstWs.close(1012, 'gateway-restart');
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const reconnectWs = wsInstances[1];
+      act(() => {
+        reconnectWs.simulateMessage({ type: 'event', event: 'connect.challenge', payload: { nonce: 'second' } });
+      });
+
+      const reconnectReq = getConnectRequest(reconnectWs);
+      expect(reconnectReq).toBeTruthy();
+
+      act(() => {
+        reconnectWs.simulateMessage({ type: 'res', id: reconnectReq?.id, ok: true, payload: {} });
+      });
+
+      expect(result.current.transportMeta.lastCloseCode).toBe(null);
+      expect(result.current.transportMeta.lastCloseReason).toBe(null);
+      expect(result.current.connectionState).toBe('connected');
+    });
   });
 
   describe('Connect handshake payload', () => {

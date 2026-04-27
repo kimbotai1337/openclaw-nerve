@@ -652,4 +652,108 @@ describe('ChatContext subscription stability', () => {
       expect(messages[0]?.rawText).toBe('Existing transcript');
     });
   });
+
+  it('does not duplicate the final assistant message after disconnect and reconcile', async () => {
+    const initialRealtimeState = {
+      connection: {
+        status: 'live' as const,
+        lastLiveAt: 0,
+        lastDisconnectReason: null,
+        reconcileNeeded: false,
+        reconnectAttempt: 0,
+      },
+      sessions: {
+        main: { sessionId: 'main', status: 'running', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' },
+      },
+      runs: {
+        'run-1': {
+          runId: 'run-1',
+          sessionId: 'main',
+          status: 'running',
+          messageIds: ['run-1:assistant:stream'],
+          lastEventAt: 1,
+          finalized: false,
+        },
+      },
+      messages: {
+        'run-1:assistant:stream': {
+          messageId: 'run-1:assistant:stream',
+          sessionId: 'main',
+          runId: 'run-1',
+          role: 'assistant' as const,
+          contentParts: [{ type: 'text' as const, text: 'hello' }],
+          status: 'streaming' as const,
+          revision: 1,
+          createdAt: 1,
+        },
+      },
+      agentPresence: {},
+    };
+
+    const { ChatProvider, useChat, realtimeStateRef, requestSnapshotMock } = await setup({
+      currentSession: 'main',
+      realtimeState: initialRealtimeState,
+    });
+
+    requestSnapshotMock.mockImplementation(async () => {
+      realtimeStateRef.current = {
+        ...realtimeStateRef.current,
+        runs: {
+          'run-1': {
+            ...initialRealtimeState.runs['run-1'],
+            status: 'completed',
+            finalized: true,
+            messageIds: ['run-1:assistant:final'],
+            lastEventAt: 2,
+          },
+        },
+        messages: {
+          'run-1:assistant:final': {
+            messageId: 'run-1:assistant:final',
+            sessionId: 'main',
+            runId: 'run-1',
+            role: 'assistant',
+            contentParts: [{ type: 'text', text: 'hello' }],
+            status: 'committed',
+            revision: 2,
+            createdAt: 2,
+          },
+        },
+      };
+    });
+
+    let assistantCount = 0;
+
+    function Consumer() {
+      const { messages } = useChat();
+      useEffect(() => {
+        assistantCount = messages.filter((message) => message.role === 'assistant').length;
+      }, [messages]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(assistantCount).toBe(1);
+    });
+
+    await act(async () => {
+      await requestSnapshotMock('main', 'reconnect');
+    });
+
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(assistantCount).toBe(1);
+    });
+  });
 });

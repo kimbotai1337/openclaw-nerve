@@ -49,6 +49,17 @@ function gatewayCall(method: string, params: Record<string, unknown>): Promise<u
   return gatewayRpcCall(method, params);
 }
 
+function logWsLifecycle(
+  tag: string,
+  message: string,
+  fields: Record<string, string | number | boolean | null | undefined>,
+): void {
+  const serialized = Object.entries(fields)
+    .map(([key, value]) => `${key}=${String(value ?? 'null')}`)
+    .join(' ');
+  console.log(`${tag} ${message}${serialized ? ` ${serialized}` : ''}`);
+}
+
 /** Active WSS instances — used for graceful shutdown */
 const activeWssInstances: WebSocketServer[] = [];
 
@@ -101,8 +112,13 @@ export function setupWebSocketProxy(server: HttpServer | HttpsServer): void {
     const tag = `[ws-proxy:${connId}]`;
     const url = new URL(req.url || '/', 'https://localhost');
     const target = url.searchParams.get('target');
+    const isTrusted = canInjectGatewayToken(req);
 
-    console.log(`${tag} New connection: target=${target}`);
+    logWsLifecycle(tag, 'New connection:', {
+      phase: 'connected',
+      target,
+      trusted: isTrusted,
+    });
 
     if (!target) {
       clientWs.close(1008, 'Missing ?target= param');
@@ -137,8 +153,6 @@ export function setupWebSocketProxy(server: HttpServer | HttpsServer): void {
 
     // Determine if the client is trusted enough for token injection.
     // canInjectGatewayToken accounts for both auth state and loopback detection (proxy-aware).
-    const isTrusted = canInjectGatewayToken(req);
-
     createGatewayRelay(clientWs, targetUrl, clientOrigin, connId, isTrusted);
   });
 }
@@ -354,7 +368,13 @@ function createGatewayRelay(
 
     gwWs.on('close', (code, reason) => {
       const reasonStr = reason?.toString() || '';
-      console.log(`${tag} Gateway closed: code=${code}, reason=${reasonStr}`);
+      logWsLifecycle(tag, 'Gateway lifecycle:', {
+        phase: 'gateway-close',
+        closeCode: code,
+        closeReason: reasonStr || 'unknown',
+        useDeviceIdentity,
+        hasRetried,
+      });
       clearChallengeTimer();
 
       // Device auth rejected — retry without device identity
@@ -366,7 +386,13 @@ function createGatewayRelay(
       );
 
       if (useDeviceIdentity && !hasRetried && isDeviceRejection && clientWs.readyState === WebSocket.OPEN) {
-        console.log(`${tag} Device rejected (${reasonStr}) — retrying without device identity`);
+        logWsLifecycle(tag, 'Gateway lifecycle:', {
+          phase: 'gateway-retry',
+          closeCode: code,
+          closeReason: reasonStr || 'unknown',
+          useDeviceIdentity: false,
+          hasRetried: true,
+        });
         useDeviceIdentity = false;
         hasRetried = true;
         openGateway();
