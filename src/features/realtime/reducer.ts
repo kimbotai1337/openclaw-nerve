@@ -267,10 +267,10 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
     case 'snapshot.loaded':
       if (!isFreshSnapshot(next, event.snapshot)) return next;
       replaceSnapshotSessionState(next, event.snapshot);
+      next.connection.reconcileNeeded = false;
       return next;
 
     case 'snapshot.merge_completed':
-      next.connection.reconcileNeeded = false;
       return next;
   }
 }

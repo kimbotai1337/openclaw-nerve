@@ -329,7 +329,7 @@ describe('realtimeReducer', () => {
     expect(state.messages['assistant-1']).toEqual(committedMessage);
   });
 
-  it('keeps transport health independent while reconciliation is pending', () => {
+  it('keeps transport health independent while reconciliation resolves', () => {
     const snapshot: RealtimeSnapshotPayload = {
       session: {
         sessionId: 'agent:main:main',
@@ -381,7 +381,7 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(pendingState.connection.status).toBe('live');
-    expect(pendingState.connection.reconcileNeeded).toBe(true);
+    expect(pendingState.connection.reconcileNeeded).toBe(false);
     expect(pendingState.connection.lastLiveAt).toBe(3);
 
     const mergedState = realtimeReducer(pendingState, {
@@ -448,7 +448,7 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(state.connection.status).toBe('degraded');
-    expect(state.connection.reconcileNeeded).toBe(true);
+    expect(state.connection.reconcileNeeded).toBe(false);
     expect(state.connection.lastDisconnectReason).toBe('slow-link');
   });
 
@@ -533,6 +533,74 @@ describe('realtimeReducer', () => {
     expect(state.runs['run-1']?.status).toBe('running');
     expect(state.runs['run-1']?.lastEventAt).toBe(40);
     expect(state.messages['assistant-live']?.messageId).toBe('assistant-live');
+  });
+
+  it('keeps reconcileNeeded set when a requested snapshot is rejected as stale', () => {
+    const staleSnapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'idle',
+        agentId: 'main',
+        updatedAt: 20,
+        sourceVersion: 'v1',
+      },
+      runs: [],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 20,
+      source: 'server-reconcile',
+    };
+
+    const state = apply([
+      {
+        type: 'connection.opened',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        reconnectAttempt: 0,
+      },
+      {
+        type: 'connection.reconcile_requested',
+        eventId: 'evt-2',
+        receivedAt: 11,
+        source: 'local',
+        sessionId: 'agent:main:main',
+        reason: 'chat-gap',
+      },
+      {
+        type: 'session.upserted',
+        eventId: 'evt-3',
+        receivedAt: 12,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        session: {
+          sessionId: 'agent:main:main',
+          status: 'running',
+          agentId: 'main',
+          updatedAt: 30,
+          sourceVersion: 'v2',
+        },
+      },
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-4',
+        receivedAt: 13,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot: staleSnapshot,
+      },
+      {
+        type: 'snapshot.merge_completed',
+        eventId: 'evt-5',
+        receivedAt: 14,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+      },
+    ]);
+
+    expect(state.sessions['agent:main:main']?.status).toBe('running');
+    expect(state.connection.reconcileNeeded).toBe(true);
   });
 
   it('keeps finalized runs terminal and ignores duplicate run.created events', () => {
