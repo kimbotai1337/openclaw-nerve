@@ -1229,6 +1229,121 @@ describe('ws-proxy', () => {
 
       ws.close();
     });
+
+    it('emits failed tool_call_completed for pending tools without a runId on aborted chat frames', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:main:main',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'custom_tool',
+            toolCallId: 'tool-no-run-id-1',
+          },
+        },
+      }));
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:main:main',
+          state: 'aborted',
+        },
+      }));
+
+      await vi.waitFor(() => {
+        expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledTimes(1);
+      });
+
+      expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: 'custom_tool',
+        success: false,
+        surface: 'chat',
+      }));
+
+      ws.close();
+    });
+
+    it('emits failed tool_call_completed when the gateway disconnects before a pending tool returns', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:main:main',
+          runId: 'run-tool-gateway-close-1',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'custom_tool',
+            toolCallId: 'tool-gateway-close-1',
+          },
+        },
+      }));
+
+      mockGw.disconnectAll(1011, 'gateway dropped');
+
+      await vi.waitFor(() => {
+        expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledTimes(1);
+      });
+
+      expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: 'custom_tool',
+        success: false,
+        surface: 'chat',
+      }));
+    });
+
+    it('emits failed tool_call_completed when the client disconnects before a pending tool returns', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:main:main',
+          runId: 'run-tool-client-close-1',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'custom_tool',
+            toolCallId: 'tool-client-close-1',
+          },
+        },
+      }));
+
+      const closePromise = waitForClose(ws);
+      ws.close();
+      await closePromise;
+
+      await vi.waitFor(() => {
+        expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledTimes(1);
+      });
+
+      expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: 'custom_tool',
+        success: false,
+        surface: 'chat',
+      }));
+    });
   });
 });
 

@@ -315,14 +315,25 @@ function createGatewayRelay(
     }));
   }
 
-  function flushPendingToolsForRun(runId: string | undefined, success: boolean): void {
-    if (!runId) return;
-
+  function flushPendingTools(
+    success: boolean,
+    predicate: (entry: PendingTool) => boolean = () => true,
+  ): void {
     for (const [toolCallId, entry] of pendingTools.entries()) {
-      if (entry.runId !== runId) continue;
+      if (!predicate(entry)) continue;
       pendingTools.delete(toolCallId);
       recordToolCompleted(entry, success);
     }
+  }
+
+  function flushPendingToolsForRun(runId: string | undefined, success: boolean): void {
+    flushPendingTools(success, (entry) => (
+      runId ? entry.runId === runId : entry.runId === undefined
+    ));
+  }
+
+  function flushAllPendingTools(success: boolean): void {
+    flushPendingTools(success);
   }
 
   function handleGatewayTelemetryFrame(message: Record<string, unknown>): void {
@@ -374,8 +385,8 @@ function createGatewayRelay(
 
     if (message.type === 'event' && message.event === 'chat' && isRecord(message.payload)) {
       const payload = message.payload;
-      if ((payload.state === 'error' || payload.state === 'aborted') && typeof payload.runId === 'string') {
-        flushPendingToolsForRun(payload.runId, false);
+      if (payload.state === 'error' || payload.state === 'aborted') {
+        flushPendingToolsForRun(typeof payload.runId === 'string' ? payload.runId : undefined, false);
       }
     }
   }
@@ -535,6 +546,7 @@ function createGatewayRelay(
     gwWs.on('error', (err) => {
       console.error(`${tag} Gateway error:`, err.message);
       clearChallengeTimer();
+      flushAllPendingTools(false);
       if (!hasRetried || handshakeComplete) clientWs.close();
     });
 
@@ -542,6 +554,7 @@ function createGatewayRelay(
       const reasonStr = reason?.toString() || '';
       console.log(`${tag} Gateway closed: code=${code}, reason=${reasonStr}`);
       clearChallengeTimer();
+      flushAllPendingTools(false);
 
       // Device auth rejected — retry without device identity
       const isDeviceRejection = code === 1008 && (
@@ -671,6 +684,7 @@ function createGatewayRelay(
   clientWs.on('close', (code, reason) => {
     clearInterval(pingTimer);
     clearChallengeTimer();
+    flushAllPendingTools(false);
     const duration = Date.now() - connStartTime;
     console.log(`${tag} Client closed: code=${code}, reason=${reason?.toString()}`);
     console.log(`${tag} Summary: duration=${duration}ms, client->gw=${clientToGatewayCount}, gw->client=${gatewayToClientCount}`);
@@ -679,6 +693,7 @@ function createGatewayRelay(
   clientWs.on('error', (err) => {
     clearInterval(pingTimer);
     clearChallengeTimer();
+    flushAllPendingTools(false);
     console.error(`${tag} Client error:`, err.message);
     if (gwWs) gwWs.close();
   });
