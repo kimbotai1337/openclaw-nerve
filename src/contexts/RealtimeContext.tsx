@@ -65,20 +65,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (connectionState === 'disconnected' && transportMeta.lastCloseReason) {
-      dispatch({
-        type: 'connection.degraded',
-        eventId: buildLocalEventId('connection-degraded', 'global', receivedAt),
-        receivedAt,
-        source: 'local',
-        sessionId: 'global',
-        reason: transportMeta.lastCloseReason,
-      });
-    }
   }, [
     connectionState,
     reconnectAttempt,
-    transportMeta.lastCloseCode,
     transportMeta.lastCloseReason,
   ]);
 
@@ -113,6 +102,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       }
 
       dispatch(normalizeSnapshotLoaded(payload.snapshot));
+      dispatch({
+        type: 'snapshot.merge_completed',
+        eventId: buildLocalEventId('snapshot-merged', sessionId, Date.now()),
+        receivedAt: Date.now(),
+        source: 'local',
+        sessionId,
+      });
     } catch (error) {
       dispatch({
         type: 'connection.degraded',
@@ -123,14 +119,6 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         reason: error instanceof Error ? error.message : 'snapshot-request-failed',
       });
       throw error;
-    } finally {
-      dispatch({
-        type: 'snapshot.merge_completed',
-        eventId: buildLocalEventId('snapshot-merged', sessionId, Date.now()),
-        receivedAt: Date.now(),
-        source: 'local',
-        sessionId,
-      });
     }
   }, []);
 

@@ -117,4 +117,54 @@ describe('RealtimeProvider', () => {
     expect(result.current.state.connection.reconcileNeeded).toBe(false);
     expect(result.current.realtimeStatus).toBe('live');
   });
+
+  it('keeps reconcileNeeded set when snapshot reconcile fails', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mod = await import('./RealtimeContext');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <mod.RealtimeProvider>{children}</mod.RealtimeProvider>
+    );
+
+    const { result } = renderHook(() => mod.useRealtime(), { wrapper });
+
+    let thrown: unknown;
+    await act(async () => {
+      try {
+        await result.current.requestSnapshot('agent:main:main', 'reconnect');
+      } catch (error) {
+        thrown = error;
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/realtime/snapshot?sessionKey=agent%3Amain%3Amain');
+    expect(thrown).toBeInstanceOf(Error);
+    expect(result.current.state.connection.reconcileNeeded).toBe(true);
+    expect(result.current.realtimeStatus).toBe('syncing');
+  });
+
+  it('keeps disconnected transport classified as offline', async () => {
+    gatewayMockState.connectionState = 'disconnected';
+    gatewayMockState.transportMeta = {
+      lastCloseCode: 1006,
+      lastCloseReason: 'socket-closed',
+      connectedAt: null,
+    };
+
+    const mod = await import('./RealtimeContext');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <mod.RealtimeProvider>{children}</mod.RealtimeProvider>
+    );
+
+    const { result } = renderHook(() => mod.useRealtime(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.state.connection.status).toBe('offline');
+      expect(result.current.realtimeStatus).toBe('offline');
+    });
+  });
 });
