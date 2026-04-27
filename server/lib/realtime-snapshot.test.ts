@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { GatewayEvent } from '../../src/types';
+import { normalizeGatewayEvent, normalizeSnapshotLoaded } from '../../src/features/realtime/normalizedEvent';
+import { createInitialRealtimeState, realtimeReducer } from '../../src/features/realtime/reducer';
 
 const gatewayRpcCallMock = vi.hoisted(() => vi.fn());
 
@@ -283,6 +286,194 @@ describe('buildRealtimeSnapshot', () => {
         lastEventAt: 9_900,
         status: 'running',
         finalized: false,
+      }),
+    ]);
+  });
+
+  it('does not reopen a stale latestRunId when a different currentRunId is active', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(12_000);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'running',
+              updatedAt: 11_900,
+              currentRunId: 'run-current',
+              latestRunId: 'run-older',
+              busy: true,
+              processing: true,
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.runs).toEqual([
+      {
+        runId: 'run-current',
+        sessionId: 'agent:main:main',
+        status: 'running',
+        messageIds: [],
+        lastEventAt: 11_900,
+        finalized: false,
+      },
+    ]);
+  });
+
+  it('keeps a last-run placeholder terminal when the session is idle and history is gone', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(13_000);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'idle',
+              updatedAt: 12_900,
+              latestRunId: 'run-last',
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.runs).toEqual([
+      {
+        runId: 'run-last',
+        sessionId: 'agent:main:main',
+        status: 'completed',
+        messageIds: [],
+        lastEventAt: 12_900,
+        finalized: true,
+      },
+    ]);
+  });
+
+  it('uses the live assistant fallback message id so late deltas do not create a second entity', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(14_000);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'done',
+              updatedAt: 13_900,
+              latestRunId: 'run-interop',
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return {
+          messages: [
+            {
+              role: 'assistant',
+              content: 'final answer',
+              createdAt: 13_850,
+              runId: 'run-interop',
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    const deltaEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 1,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-interop',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'late token' }] },
+      },
+    };
+
+    const state = [
+      normalizeSnapshotLoaded(snapshot),
+      ...normalizeGatewayEvent(deltaEvent),
+    ].reduce(realtimeReducer, createInitialRealtimeState());
+
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        messageId: 'run-interop:assistant',
+      }),
+    ]);
+    expect(Object.keys(state.messages)).toEqual(['run-interop:assistant']);
+    expect(state.messages['run-interop:assistant']).toMatchObject({
+      status: 'committed',
+      contentParts: [{ type: 'text', text: 'final answer' }],
+    });
+  });
+
+  it('strips user transport decorations that loadHistory already cleans', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(15_000);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'idle',
+              updatedAt: 14_900,
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return {
+          messages: [
+            {
+              role: 'user',
+              createdAt: 14_850,
+              content: 'Conversation info (untrusted metadata):\n{"message_id":"m-1","sender":"webchat"}\n[Wed 2026-04-24 12:00 GMT+3] [voice] Hello from voice\n\n<nerve-upload-manifest>{"version":1,"attachments":[{"id":"att-1"}]}</nerve-upload-manifest>\n\n[system: User sent a voice message. Always include your full text reply AND a [tts:...] marker so it plays back as audio.]',
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        contentParts: [{ type: 'text', text: 'Hello from voice' }],
       }),
     ]);
   });

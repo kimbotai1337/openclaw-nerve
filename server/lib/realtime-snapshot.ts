@@ -18,10 +18,14 @@ const ACTIVE_RUN_STATUSES = new Set([
 const QUEUED_RUN_STATUSES = new Set(['queued', 'pending']);
 const FAILED_RUN_STATUSES = new Set(['error', 'failed']);
 const INTERRUPTED_RUN_STATUSES = new Set(['aborted', 'interrupted', 'stopped', 'cancelled']);
+const COMPLETED_RUN_SESSION_STATUSES = new Set(['done', 'idle', 'completed']);
 const INTERNAL_CONTROL_REPLY_RE = /^(?:NO_REPLY|HEARTBEAT_OK)$/;
 const SYSTEM_EVENT_LINE = /^System(?: \(untrusted\))?: \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]/;
 const SYSTEM_EVENT_FOLLOWUP_LINE = /^(?:An async command you ran earlier has completed\.|A scheduled reminder has been triggered\.|A scheduled cron event was triggered(?:, but no event content was found)?\.|Handle this reminder internally\.|Handle this internally\.|Handle the result internally\.?|Do not relay it to the user unless explicitly requested\.|Please relay the command output to the user in a helpful way\.|Please relay this reminder to the user in a helpful and friendly way\.|Current time:)/i;
 const CHART_PREFIX = '[chart:';
+const TTS_SYSTEM_HINT_RE = /\s*\[system: User sent a voice message\.[\s\S]*$/;
+const WEBCHAT_ENVELOPE_RE = /Conversation info \(untrusted metadata\):[\s\S]*?"sender":\s*"[^"]*"\s*\}\s*\n?(?:```\s*\n?)?(?:\n?\[[\w, ]+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]\s*)?/g;
+const UPLOAD_MANIFEST_RE = /\s*<nerve-upload-manifest>([\s\S]*?)<\/nerve-upload-manifest>\s*$/;
 
 interface BuildRealtimeSnapshotArgs {
   sessionKey: string;
@@ -244,6 +248,25 @@ function extractTtsMarkers(text: string): { cleaned: string; ttsText: string | n
   return { cleaned: cleaned.trim(), ttsText };
 }
 
+function stripUploadManifest(text: string): string {
+  const match = text.match(UPLOAD_MANIFEST_RE);
+  if (!match) return text;
+
+  try {
+    JSON.parse(match[1]);
+    return text.replace(UPLOAD_MANIFEST_RE, '').trimEnd();
+  } catch {
+    return text;
+  }
+}
+
+function normalizeUserHistoryText(rawText: string): string {
+  const withoutTtsHint = rawText.replace(TTS_SYSTEM_HINT_RE, '');
+  const withoutEnvelope = withoutTtsHint.replace(WEBCHAT_ENVELOPE_RE, '');
+  const withoutVoicePrefix = withoutEnvelope.replace(/^\[voice\]\s*/, '');
+  return stripUploadManifest(withoutVoicePrefix);
+}
+
 function isValidChartData(value: unknown): value is ChartData {
   if (!value || typeof value !== 'object') return false;
   const chart = value as Record<string, unknown>;
@@ -361,7 +384,9 @@ function normalizeHistoryMessage(
   const role = trimToNull(message.role)?.toLowerCase();
   if (role !== 'user' && role !== 'assistant' && role !== 'system') return null;
 
-  const rawText = extractMessageText(message);
+  const rawText = role === 'user'
+    ? normalizeUserHistoryText(extractMessageText(message))
+    : extractMessageText(message);
   const { cleaned: ttsStripped } = extractTtsMarkers(rawText);
   const { cleaned, charts } = extractChartMarkers(ttsStripped);
   const trimmed = cleaned.trim();
@@ -372,9 +397,12 @@ function normalizeHistoryMessage(
 
   const createdAt = getMessageCreatedAt(message) ?? recoveredAt + index;
   const runId = getMessageRunId(message);
+  const fallbackMessageId = role === 'assistant' && runId
+    ? `${runId}:assistant`
+    : `${sessionKey}:${runId ?? 'norun'}:${role}:${createdAt}:${index}`;
   const messageId = getMessageId(
     message,
-    `${sessionKey}:${runId ?? 'norun'}:${role}:${createdAt}:${index}`,
+    fallbackMessageId,
   );
 
   return {
@@ -391,33 +419,58 @@ function normalizeHistoryMessage(
   };
 }
 
-function getPrimaryRunId(session: GatewaySessionSummary | null): string | null {
-  return trimToNull(session?.currentRunId)
-    ?? trimToNull(session?.runId)
-    ?? trimToNull(session?.latestRunId);
+function isOpenRunSession(session: GatewaySessionSummary | null): boolean {
+  const sessionStatus = resolveSessionStatus(session);
+  return Boolean(session?.busy || session?.processing || ACTIVE_RUN_STATUSES.has(sessionStatus));
 }
 
-function getLatestRunId(session: GatewaySessionSummary | null): string | null {
+function isQueuedRunSession(session: GatewaySessionSummary | null): boolean {
+  return QUEUED_RUN_STATUSES.has(resolveSessionStatus(session));
+}
+
+function getActiveRunId(session: GatewaySessionSummary | null): string | null {
+  const currentRunId = trimToNull(session?.currentRunId);
+  if (currentRunId) return currentRunId;
+
+  const directRunId = trimToNull(session?.runId);
+  if (directRunId) return directRunId;
+
+  if (isOpenRunSession(session) || isQueuedRunSession(session)) {
+    return trimToNull(session?.latestRunId);
+  }
+
+  return null;
+}
+
+function getLastKnownRunId(session: GatewaySessionSummary | null): string | null {
   return trimToNull(session?.latestRunId)
-    ?? trimToNull(session?.currentRunId)
-    ?? trimToNull(session?.runId);
+    ?? trimToNull(session?.runId)
+    ?? trimToNull(session?.currentRunId);
+}
+
+function isTerminalPlaceholderSession(session: GatewaySessionSummary | null): boolean {
+  const sessionStatus = resolveSessionStatus(session);
+  if (session?.abortedLastRun || INTERRUPTED_RUN_STATUSES.has(sessionStatus)) return true;
+  if (FAILED_RUN_STATUSES.has(sessionStatus)) return true;
+  return COMPLETED_RUN_SESSION_STATUSES.has(sessionStatus);
 }
 
 function resolveRunState(
   session: GatewaySessionSummary | null,
   runId: string,
   hasMessages: boolean,
+  activeRunId: string | null,
+  terminalPlaceholderRunId: string | null,
 ): Pick<RealtimeRunEntity, 'status' | 'finalized'> {
   const sessionStatus = resolveSessionStatus(session);
-  const primaryRunId = getPrimaryRunId(session);
-  const latestRunId = getLatestRunId(session);
-  const matchesSessionRun = runId === primaryRunId || runId === latestRunId;
+  const isActiveRun = runId === activeRunId;
+  const isTerminalPlaceholder = runId === terminalPlaceholderRunId;
 
-  if (matchesSessionRun) {
-    if (session?.busy || session?.processing || ACTIVE_RUN_STATUSES.has(sessionStatus)) {
+  if (isActiveRun) {
+    if (isOpenRunSession(session)) {
       return { status: 'running', finalized: false };
     }
-    if (QUEUED_RUN_STATUSES.has(sessionStatus)) {
+    if (isQueuedRunSession(session)) {
       return { status: 'queued', finalized: false };
     }
     if (session?.abortedLastRun || INTERRUPTED_RUN_STATUSES.has(sessionStatus)) {
@@ -426,10 +479,24 @@ function resolveRunState(
     if (FAILED_RUN_STATUSES.has(sessionStatus)) {
       return { status: 'failed', finalized: true };
     }
+    if (!hasMessages && COMPLETED_RUN_SESSION_STATUSES.has(sessionStatus)) {
+      return { status: 'completed', finalized: true };
+    }
+    if (!hasMessages) {
+      return { status: 'unknown', finalized: false };
+    }
   }
 
-  if (!hasMessages && matchesSessionRun) {
-    return { status: 'unknown', finalized: false };
+  if (!hasMessages && isTerminalPlaceholder) {
+    if (session?.abortedLastRun || INTERRUPTED_RUN_STATUSES.has(sessionStatus)) {
+      return { status: 'interrupted', finalized: true };
+    }
+    if (FAILED_RUN_STATUSES.has(sessionStatus)) {
+      return { status: 'failed', finalized: true };
+    }
+    if (COMPLETED_RUN_SESSION_STATUSES.has(sessionStatus)) {
+      return { status: 'completed', finalized: true };
+    }
   }
 
   return { status: 'completed', finalized: true };
@@ -494,19 +561,21 @@ export async function buildRealtimeSnapshot(
     });
   }
 
-  const primaryRunId = getPrimaryRunId(session);
-  if (primaryRunId && !runAccumulators.has(primaryRunId)) {
-    runAccumulators.set(primaryRunId, {
-      runId: primaryRunId,
+  const activeRunId = getActiveRunId(session);
+  if (activeRunId && !runAccumulators.has(activeRunId)) {
+    runAccumulators.set(activeRunId, {
+      runId: activeRunId,
       messageIds: [],
       lastEventAt: 0,
     });
   }
 
-  const latestRunId = getLatestRunId(session);
-  if (latestRunId && !runAccumulators.has(latestRunId)) {
-    runAccumulators.set(latestRunId, {
-      runId: latestRunId,
+  const terminalPlaceholderRunId = !activeRunId && isTerminalPlaceholderSession(session)
+    ? getLastKnownRunId(session)
+    : null;
+  if (terminalPlaceholderRunId && !runAccumulators.has(terminalPlaceholderRunId)) {
+    runAccumulators.set(terminalPlaceholderRunId, {
+      runId: terminalPlaceholderRunId,
       messageIds: [],
       lastEventAt: 0,
     });
@@ -520,8 +589,14 @@ export async function buildRealtimeSnapshot(
   ) || recoveredAt;
 
   const runs: RealtimeRunEntity[] = [...runAccumulators.values()].map((run) => {
-    const { status, finalized } = resolveRunState(session, run.runId, run.messageIds.length > 0);
-    const isSessionScopedRun = run.runId === primaryRunId || run.runId === latestRunId;
+    const { status, finalized } = resolveRunState(
+      session,
+      run.runId,
+      run.messageIds.length > 0,
+      activeRunId,
+      terminalPlaceholderRunId,
+    );
+    const isSessionScopedRun = run.runId === activeRunId || run.runId === terminalPlaceholderRunId;
     return {
       runId: run.runId,
       sessionId: sessionKey,

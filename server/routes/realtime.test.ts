@@ -40,6 +40,19 @@ describe('GET /api/realtime/snapshot', () => {
     });
   });
 
+  it('returns 400 when sessionKey is only whitespace', async () => {
+    const app = await buildApp();
+
+    const response = await app.request('/api/realtime/snapshot?sessionKey=%20%20%20');
+
+    expect(response.status).toBe(400);
+    expect(buildRealtimeSnapshotMock).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'Too small: expected string to have >=1 characters',
+    });
+  });
+
   it('returns the snapshot payload for a valid request', async () => {
     buildRealtimeSnapshotMock.mockResolvedValue({
       session: {

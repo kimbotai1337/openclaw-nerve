@@ -14,7 +14,7 @@ const app = new Hono();
 
 app.get('/api/realtime/snapshot', rateLimitGeneral, async (c) => {
   const parsed = snapshotQuerySchema.safeParse({
-    sessionKey: c.req.query('sessionKey') ?? '',
+    sessionKey: c.req.query('sessionKey')?.trim() ?? '',
     limit: c.req.query('limit') ?? DEFAULT_LIMIT,
   });
 
