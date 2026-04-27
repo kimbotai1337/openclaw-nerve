@@ -130,7 +130,9 @@ Heartbeat snapshots also contain exactly these feature booleans:
 | `features_used_24h.sessions` | a session being created explicitly, opened from the UI, renamed, deleted, or implicitly recorded when the first successful message lands in a previously unseen root session |
 | `features_used_24h.branches` | a top-level branch being created or a top-level workspace branch switch being recorded |
 | `features_used_24h.kanban` | Kanban task creation and current Kanban mutation flows such as reorder, execute, approve, reject, or abort |
-| `features_used_24h.settings` | current settings write paths for API keys, transcription config, or voice phrases |
+| `features_used_24h.settings` | current tracked settings write paths such as API keys, STT config, language or voice phrase updates |
+
+For the exact per-boolean trigger inventory, including what does **not** currently count, see [Telemetry Feature Booleans](./TELEMETRY-FEATURE-BOOLEANS.md).
 
 `active_24h` is `true` if any counter is non-zero or any feature boolean is `true` inside the trailing 24 hour window.
 
