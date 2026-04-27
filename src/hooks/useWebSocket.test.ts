@@ -29,10 +29,10 @@ class MockWebSocket {
     this.sentMessages.push(data);
   }
 
-  close() {
+  close(code = 1000, reason = '') {
     this.readyState = MockWebSocket.CLOSED;
     setTimeout(() => {
-      this.onclose?.(new CloseEvent('close'));
+      this.onclose?.(new CloseEvent('close', { code, reason }));
     }, 0);
   }
 
@@ -107,6 +107,92 @@ describe('useWebSocket', () => {
       });
 
       expect(result.current.connectionState).toBe('disconnected');
+    });
+
+    it('tracks transport metadata after auth success', async () => {
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      vi.spyOn(Date, 'now').mockReturnValue(1234);
+
+      const { result } = renderHook(() => useWebSocket());
+
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token');
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const ws = wsInstances[0];
+      act(() => {
+        ws.simulateMessage({ type: 'event', event: 'connect.challenge', payload: { nonce: 'n0' } });
+      });
+
+      const connectReq = getConnectRequest(ws);
+      expect(connectReq).toBeTruthy();
+
+      act(() => {
+        ws.simulateMessage({ type: 'res', id: connectReq?.id, ok: true, payload: {} });
+      });
+
+      expect(result.current.transportMeta).toEqual({
+        lastCloseCode: null,
+        lastCloseReason: null,
+        connectedAt: 1234,
+      });
+    });
+
+    it('records the last close code and reason on unexpected disconnects', async () => {
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      const { result } = renderHook(() => useWebSocket());
+
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token');
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const ws = wsInstances[0];
+      act(() => {
+        ws.simulateMessage({ type: 'event', event: 'connect.challenge', payload: { nonce: 'n0' } });
+      });
+
+      const connectReq = getConnectRequest(ws);
+      expect(connectReq).toBeTruthy();
+
+      act(() => {
+        ws.simulateMessage({ type: 'res', id: connectReq?.id, ok: true, payload: {} });
+      });
+
+      act(() => {
+        ws.close(1012, 'gateway-restart');
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(result.current.transportMeta.lastCloseCode).toBe(1012);
+      expect(result.current.transportMeta.lastCloseReason).toBe('gateway-restart');
+      expect(result.current.connectionState).toBe('reconnecting');
     });
   });
 

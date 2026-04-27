@@ -3,6 +3,12 @@ import type { GatewayMessage, GatewayEvent, GatewayResponse } from '@/types';
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
+export interface TransportMeta {
+  lastCloseCode: number | null;
+  lastCloseReason: string | null;
+  connectedAt: number | null;
+}
+
 interface PendingReq {
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
@@ -10,6 +16,7 @@ interface PendingReq {
 
 interface UseWebSocketReturn {
   connectionState: ConnectionState;
+  transportMeta: TransportMeta;
   connect: (url: string, token: string) => Promise<void>;
   disconnect: () => void;
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
@@ -53,6 +60,11 @@ function getOrCreateInstanceId(): string {
  */
 export function useWebSocket(): UseWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  const [transportMeta, setTransportMeta] = useState<TransportMeta>({
+    lastCloseCode: null,
+    lastCloseReason: null,
+    connectedAt: null,
+  });
   const [connectError, setConnectError] = useState('');
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
@@ -188,6 +200,11 @@ export function useWebSocket(): UseWebSocketReturn {
               hasConnectedRef.current = true;
               setReconnectAttempt(0);
               setConnectError('');
+              setTransportMeta({
+                lastCloseCode: null,
+                lastCloseReason: null,
+                connectedAt: Date.now(),
+              });
               setConnectionState('connected');
               connectResolveRef.current?.();
             } else {
@@ -227,11 +244,17 @@ export function useWebSocket(): UseWebSocketReturn {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         rejectPending(new Error('WebSocket disconnected'));
 
         // Stale connection: a newer doConnect has already superseded this one
         if (gen !== connectionGenRef.current) return;
+
+        setTransportMeta((prev) => ({
+          ...prev,
+          lastCloseCode: event.code ?? null,
+          lastCloseReason: event.reason || 'socket-closed',
+        }));
 
         // Don't reconnect if intentionally disconnected, no credentials, or never connected
         if (intentionalDisconnectRef.current || !credentialsRef.current || !hasConnectedRef.current) {
@@ -306,5 +329,14 @@ export function useWebSocket(): UseWebSocketReturn {
     return doConnect(url, token, false);
   }, [doConnect, clearReconnectTimeout]);
 
-  return { connectionState, connect, disconnect, rpc, onEvent, connectError, reconnectAttempt };
+  return {
+    connectionState,
+    transportMeta,
+    connect,
+    disconnect,
+    rpc,
+    onEvent,
+    connectError,
+    reconnectAttempt,
+  };
 }

@@ -12,6 +12,7 @@ describe('ChatContext subscription stability', () => {
 
   async function setup() {
     const subscribeMock = vi.fn(() => () => {});
+    const requestSnapshotMock = vi.fn(async () => {});
     const rpcMock = vi.fn(async (method: string) => {
       if (method === 'chat.send') return { runId: 'run-1', status: 'started' };
       return {};
@@ -36,6 +37,12 @@ describe('ChatContext subscription stability', () => {
       useSettings: () => ({
         soundEnabled: false,
         speak: vi.fn(),
+      }),
+    }));
+
+    vi.doMock('./RealtimeContext', () => ({
+      useRealtime: () => ({
+        requestSnapshot: requestSnapshotMock,
       }),
     }));
 

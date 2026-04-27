@@ -1,25 +1,14 @@
 /**
  * useChatRecovery — Recovery/retry logic extracted from ChatContext
  *
- * Manages stream recovery on disconnect, gap detection recovery,
- * generation-based stale-guard, and reconnect state tracking.
+ * Manages stream recovery on disconnect, gap detection recovery via
+ * snapshot reconcile, generation-based stale-guard, and reconnect state
+ * tracking.
  */
 import { useRef, useCallback, useEffect, useMemo } from 'react';
-import { loadChatHistory, mergeRecoveredTail } from '@/features/chat/operations';
 import type { RecoveryReason } from '@/features/chat/operations';
-import type { RunState } from '@/features/chat/operations';
-import type { ChatMsg } from '@/features/chat/types';
 import type { ChatStreamState } from '@/contexts/ChatContext';
-
-// ─── Constants ──────────────────────────────────────────────────────────────────
-
-export const RECOVERY_LIMITS: Record<RecoveryReason, number> = {
-  'unrenderable-final': 40,
-  'frame-gap': 80,
-  'chat-gap': 80,
-  reconnect: 120,
-  'subagent-complete': 500,
-};
+import type { ReconcileReason } from '@/features/realtime/types';
 
 // ─── Internal types ─────────────────────────────────────────────────────────────
 
@@ -32,24 +21,30 @@ interface RecoveryState {
 // ─── Hook ───────────────────────────────────────────────────────────────────────
 
 interface UseChatRecoveryDeps {
-  rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+  requestSnapshot: (sessionId: string, reason: ReconcileReason) => Promise<void>;
   currentSessionRef: React.RefObject<string>;
   isGeneratingRef: React.RefObject<boolean>;
   activeRunIdRef: React.RefObject<string | null>;
-  runsRef: React.RefObject<Map<string, RunState>>;
-  getAllMessages: () => ChatMsg[];
-  applyMessageWindow: (all: ChatMsg[], resetVisibleWindow?: boolean) => void;
   setStream: React.Dispatch<React.SetStateAction<ChatStreamState>>;
 }
 
+function toReconcileReason(reason: RecoveryReason): ReconcileReason {
+  switch (reason) {
+    case 'frame-gap':
+    case 'chat-gap':
+    case 'reconnect':
+    case 'subagent-complete':
+      return reason;
+    case 'unrenderable-final':
+      return 'missing-run-activity';
+  }
+}
+
 export function useChatRecovery({
-  rpc,
+  requestSnapshot,
   currentSessionRef,
   isGeneratingRef,
   activeRunIdRef,
-  runsRef,
-  getAllMessages,
-  applyMessageWindow,
   setStream,
 }: UseChatRecoveryDeps) {
   const recoveryRef = useRef<RecoveryState>({ timer: null, inFlight: false, reason: null });
@@ -87,45 +82,9 @@ export function useChatRecovery({
 
       recoveryRef.current.inFlight = true;
       try {
-        const recovered = await loadChatHistory({
-          rpc,
-          sessionKey: currentSessionRef.current,
-          limit: RECOVERY_LIMITS[reason],
-        });
+        await requestSnapshot(currentSessionRef.current, toReconcileReason(reason));
 
-        // Check generation again after async fetch — another session switch or
-        // chat_final may have occurred while we were loading.
         if (capturedGeneration !== recoveryGenerationRef.current) return;
-
-        // When streaming is active, the recovered transcript may include the
-        // partial assistant text that the streaming bubble is already showing.
-        // Filter it out to avoid duplication, but keep thinking blocks so the
-        // user can see reasoning in real time.
-        const activeRun = activeRunIdRef.current;
-        const activeBuffer = activeRun
-          ? runsRef.current.get(activeRun)?.bufferText || ''
-          : '';
-        const filtered = activeBuffer.length > 0
-          ? recovered.filter(msg => {
-            // Always keep non-assistant messages (user, system, etc.)
-            if (msg.role !== 'assistant') return true;
-            // Always keep thinking blocks
-            if (msg.isThinking) return true;
-            // Always keep tool groups / intermediate tool messages
-            if (msg.toolGroup || msg.intermediate) return true;
-            // Drop assistant text that duplicates the active stream buffer.
-            // Require minimum length to avoid suppressing short legitimate messages
-            // like "Yes." or "Done" that could be common substrings.
-            const text = (msg.rawText || '').trim();
-            if (text.length >= 20 && activeBuffer.includes(text)) return false;
-            // For short texts, require exact match with the buffer (normalized).
-            if (text && text.length < 20 && activeBuffer.trim() === text) return false;
-            return true;
-          })
-          : recovered;
-
-        const merged = mergeRecoveredTail(getAllMessages(), filtered);
-        applyMessageWindow(merged, false);
       } catch (err) {
         console.debug('[ChatContext] Recovery failed:', err);
       } finally {
@@ -134,7 +93,7 @@ export function useChatRecovery({
         setStream(prev => ({ ...prev, isRecovering: false, recoveryReason: null }));
       }
     }, 180);
-  }, [applyMessageWindow, clearRecoveryTimer, rpc, currentSessionRef, activeRunIdRef, runsRef, getAllMessages, setStream]);
+  }, [clearRecoveryTimer, currentSessionRef, requestSnapshot, setStream]);
 
   /** Increment the recovery generation counter (invalidates in-flight recoveries). */
   const incrementGeneration = useCallback(() => {

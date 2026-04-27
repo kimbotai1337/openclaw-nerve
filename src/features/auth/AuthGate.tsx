@@ -6,6 +6,7 @@
  */
 import App from '@/App';
 import { GatewayProvider } from '@/contexts/GatewayContext';
+import { RealtimeProvider } from '@/contexts/RealtimeContext';
 import { SettingsProvider } from '@/contexts/SettingsContext';
 import { SessionProvider } from '@/contexts/SessionContext';
 import { ChatProvider } from '@/contexts/ChatContext';
@@ -29,13 +30,15 @@ export function AuthGate() {
 
   return (
     <GatewayProvider>
-      <SettingsProvider>
-        <SessionProvider>
-          <ChatProvider>
-            <App onLogout={logout} />
-          </ChatProvider>
-        </SessionProvider>
-      </SettingsProvider>
+      <RealtimeProvider>
+        <SettingsProvider>
+          <SessionProvider>
+            <ChatProvider>
+              <App onLogout={logout} />
+            </ChatProvider>
+          </SessionProvider>
+        </SettingsProvider>
+      </RealtimeProvider>
     </GatewayProvider>
   );
 }

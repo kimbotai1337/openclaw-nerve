@@ -16,6 +16,7 @@
  */
 import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useGateway } from './GatewayContext';
+import { useRealtime } from './RealtimeContext';
 import { useSessionContext } from './SessionContext';
 import { useSettings } from './SettingsContext';
 import { getSessionKey, type GatewayEvent } from '@/types';
@@ -101,6 +102,7 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const { connectionState, rpc, subscribe } = useGateway();
+  const { requestSnapshot } = useRealtime();
   const { currentSession, sessions } = useSessionContext();
   const { soundEnabled, speak } = useSettings();
 
@@ -134,13 +136,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const ttsHook = useChatTTS({ soundEnabled: soundEnabledRef, speak: speakRef });
 
   const recoveryHook = useChatRecovery({
-    rpc,
+    requestSnapshot,
     currentSessionRef,
     isGeneratingRef,
     activeRunIdRef,
-    runsRef,
-    getAllMessages: msgHook.getAllMessages,
-    applyMessageWindow: msgHook.applyMessageWindow,
     setStream: streamHook.setStream,
   });
 
@@ -198,6 +197,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ─── Load history on connect / recover on reconnect ───────────────────────
   const previousConnectionStateRef = useRef(connectionState);
+  const historyLoadConnectionStateRef = useRef<typeof connectionState>('disconnected');
   useEffect(() => {
     const prevConnection = previousConnectionStateRef.current;
 
@@ -222,8 +222,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
+    const prevConnection = historyLoadConnectionStateRef.current;
+    historyLoadConnectionStateRef.current = connectionState;
+
     if (connectionState !== 'connected' || !currentSession) return;
-    loadHistory(currentSession);
+    if (prevConnection === 'reconnecting') return;
+
+    void loadHistory(currentSession);
   }, [connectionState, currentSession, loadHistory]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────

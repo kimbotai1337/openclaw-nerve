@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- hooks and helpers intentionally co-located with provider */
 import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo, type ReactNode } from 'react';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useWebSocket, type TransportMeta } from '@/hooks/useWebSocket';
 import type { GatewayEvent } from '@/types';
 import { isTopLevelAgentSessionKey } from '@/features/sessions/sessionKeys';
 
@@ -8,6 +8,7 @@ type EventHandler = (msg: GatewayEvent) => void;
 
 interface GatewayContextValue {
   connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+  transportMeta: TransportMeta;
   connect: (url: string, token: string) => Promise<void>;
   disconnect: () => void;
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
@@ -45,7 +46,16 @@ function saveConfig(url: string, token: string) {
 }
 
 export function GatewayProvider({ children }: { children: ReactNode }) {
-  const { connectionState, connect: wsConnect, disconnect, rpc, onEvent, connectError, reconnectAttempt } = useWebSocket();
+  const {
+    connectionState,
+    transportMeta,
+    connect: wsConnect,
+    disconnect,
+    rpc,
+    onEvent,
+    connectError,
+    reconnectAttempt,
+  } = useWebSocket();
   const [model, setModel] = useState('--');
   const [thinking, setThinking] = useState('--');
   const [sparkline, setSparkline] = useState('▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁');
@@ -143,6 +153,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<GatewayContextValue>(() => ({
     connectionState,
+    transportMeta,
     connect,
     disconnect,
     rpc,
@@ -154,7 +165,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     isVisibleRef,
     subscribe,
   }), [
-    connectionState, connect, disconnect, rpc, connectError,
+    connectionState, transportMeta, connect, disconnect, rpc, connectError,
     reconnectAttempt, model, thinking, sparkline, subscribe,
     // isVisibleRef is a stable ref — no need to track
   ]);
