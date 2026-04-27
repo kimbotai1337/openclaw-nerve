@@ -163,7 +163,6 @@ interface GatewayChatHistoryResponse {
 }
 
 interface NormalizedHistoryMessage extends RealtimeMessageEntity {
-  _hasExplicitMessageId: boolean;
   _sortIndex: number;
 }
 
@@ -304,16 +303,16 @@ function buildAssistantHistoryFallbackMessageId(
 }
 
 function assignAssistantFallbackIds(messages: NormalizedHistoryMessage[]): void {
-  const noIdAssistantMessagesByRun = new Map<string, NormalizedHistoryMessage[]>();
+  const assistantMessagesByRun = new Map<string, NormalizedHistoryMessage[]>();
 
   for (const message of messages) {
-    if (message.role !== 'assistant' || !message.runId || message._hasExplicitMessageId) continue;
-    const group = noIdAssistantMessagesByRun.get(message.runId) ?? [];
+    if (message.role !== 'assistant' || !message.runId) continue;
+    const group = assistantMessagesByRun.get(message.runId) ?? [];
     group.push(message);
-    noIdAssistantMessagesByRun.set(message.runId, group);
+    assistantMessagesByRun.set(message.runId, group);
   }
 
-  for (const [runId, group] of noIdAssistantMessagesByRun) {
+  for (const [runId, group] of assistantMessagesByRun) {
     group.sort((left, right) => {
       if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
       return left._sortIndex - right._sortIndex;
@@ -321,16 +320,24 @@ function assignAssistantFallbackIds(messages: NormalizedHistoryMessage[]): void 
 
     const latest = group[group.length - 1];
     if (!latest) continue;
+    const liveCompatibleMessageId = `${runId}:assistant`;
+    const assignedIds = new Set<string>([liveCompatibleMessageId]);
+
+    latest.messageId = liveCompatibleMessageId;
 
     for (const message of group) {
-      message.messageId = message === latest
-        ? `${runId}:assistant`
-        : buildAssistantHistoryFallbackMessageId(
+      if (message === latest) continue;
+
+      if (assignedIds.has(message.messageId)) {
+        message.messageId = buildAssistantHistoryFallbackMessageId(
           message.sessionId,
           runId,
           message.createdAt,
           message._sortIndex,
         );
+      }
+
+      assignedIds.add(message.messageId);
     }
   }
 }
@@ -485,7 +492,6 @@ function normalizeHistoryMessage(
     status: 'committed',
     revision: createdAt,
     createdAt,
-    _hasExplicitMessageId: explicitMessageId !== null,
     _sortIndex: index,
   };
 }
@@ -698,7 +704,7 @@ export async function buildRealtimeSnapshot(
       if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
       return left._sortIndex - right._sortIndex;
     })
-    .map(({ _hasExplicitMessageId: _ignoredHasExplicitMessageId, _sortIndex: _ignoredSortIndex, ...message }) => message);
+    .map(({ _sortIndex: _ignoredSortIndex, ...message }) => message);
 
   return {
     session: {

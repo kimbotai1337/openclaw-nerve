@@ -84,7 +84,7 @@ describe('buildRealtimeSnapshot', () => {
           status: 'running',
           messageIds: [
             'agent:main:main:run-active:user:850:0',
-            'assistant-1',
+            'run-active:assistant',
           ],
           lastEventAt: 900,
           finalized: false,
@@ -102,7 +102,7 @@ describe('buildRealtimeSnapshot', () => {
           createdAt: 850,
         },
         {
-          messageId: 'assistant-1',
+          messageId: 'run-active:assistant',
           sessionId: 'agent:main:main',
           runId: 'run-active',
           role: 'assistant',
@@ -371,7 +371,7 @@ describe('buildRealtimeSnapshot', () => {
     ]);
   });
 
-  it('uses the live assistant fallback message id so late deltas do not create a second entity', async () => {
+  it('uses the live assistant message id for explicit history finals so late live events do not create a second entity', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(14_000);
 
     gatewayRpcCallMock.mockImplementation(async (method: string) => {
@@ -396,6 +396,7 @@ describe('buildRealtimeSnapshot', () => {
               content: 'final answer',
               createdAt: 13_850,
               runId: 'run-interop',
+              messageId: 'history-final-1',
             },
           ],
         };
@@ -419,9 +420,26 @@ describe('buildRealtimeSnapshot', () => {
       },
     };
 
+    const finalEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 2,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-interop',
+        state: 'final',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'final answer' }],
+          createdAt: 13_850,
+        },
+      },
+    };
+
     const state = [
       normalizeSnapshotLoaded(snapshot),
       ...normalizeGatewayEvent(deltaEvent),
+      ...normalizeGatewayEvent(finalEvent),
     ].reduce(realtimeReducer, createInitialRealtimeState());
 
     expect(snapshot.messages).toEqual([
@@ -461,12 +479,14 @@ describe('buildRealtimeSnapshot', () => {
               content: 'earlier answer',
               createdAt: 14_100,
               runId: 'run-multi-assistant',
+              messageId: 'run-multi-assistant:assistant',
             },
             {
               role: 'assistant',
               content: 'latest answer',
               createdAt: 14_200,
               runId: 'run-multi-assistant',
+              messageId: 'assistant-latest-explicit',
             },
           ],
         };
@@ -480,7 +500,7 @@ describe('buildRealtimeSnapshot', () => {
 
     expect(snapshot.messages).toHaveLength(2);
     expect(new Set(snapshot.messages.map((message) => message.messageId)).size).toBe(2);
-    expect(snapshot.messages[0]?.messageId).not.toBe('run-multi-assistant:assistant');
+    expect(snapshot.messages[0]?.messageId).toBe('agent:main:main:run-multi-assistant:assistant:14100:0');
     expect(snapshot.messages[1]?.messageId).toBe('run-multi-assistant:assistant');
     expect(snapshot.runs).toEqual([
       {
@@ -488,7 +508,7 @@ describe('buildRealtimeSnapshot', () => {
         sessionId: 'agent:main:main',
         status: 'completed',
         messageIds: [
-          snapshot.messages[0]!.messageId,
+          'agent:main:main:run-multi-assistant:assistant:14100:0',
           'run-multi-assistant:assistant',
         ],
         lastEventAt: 14_400,
