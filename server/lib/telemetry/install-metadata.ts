@@ -93,7 +93,7 @@ function normalizeTelemetryMode(value: string | null | undefined): TelemetryMode
 }
 
 function hasExplicitTelemetryModeInput(value: string | null | undefined): boolean {
-  return Boolean(value?.trim());
+  return typeof value === 'string' && value.length > 0;
 }
 
 export function readIdentity(): IdentityRecord | undefined {

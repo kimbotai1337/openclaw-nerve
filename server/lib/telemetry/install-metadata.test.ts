@@ -84,6 +84,13 @@ describe('telemetry install metadata', () => {
     })).toBe('off');
   });
 
+  it('fails closed to off when NERVE_TELEMETRY_MODE is whitespace-only', () => {
+    expect(resolveTelemetryMode({
+      envMode: '   ',
+      bootstrap: { kind: 'fresh_install', stampedAt: '2026-04-21T00:00:00Z', source: 'setup' },
+    })).toBe('off');
+  });
+
   it('falls back to unknown install method when the stamp is missing', () => {
     expect(readInstallMethodOrUnknown(undefined)).toBe('unknown');
   });
