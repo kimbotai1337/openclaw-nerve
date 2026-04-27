@@ -117,7 +117,7 @@ describe('buildRealtimeSnapshot', () => {
             },
           ],
           status: 'committed',
-          revision: 860,
+          revision: -1,
           createdAt: 860,
         },
       ],
@@ -167,6 +167,101 @@ describe('buildRealtimeSnapshot', () => {
       lastSeenAt: 1_700,
     });
     expect(snapshot.session.sourceVersion).toBe('1700|idle|||||0|0|0');
+  });
+
+  it('lets active-run snapshot assistants accept later live updates', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2_000);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'running',
+              agentState: 'thinking',
+              updatedAt: 1_950,
+              currentRunId: 'run-live',
+              latestRunId: 'run-live',
+              busy: true,
+              processing: true,
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return {
+          messages: [
+            {
+              role: 'assistant',
+              content: 'snapshot answer',
+              createdAt: 1_900,
+              runId: 'run-live',
+              messageId: 'history-live-1',
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    const deltaEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 1,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-live',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'live partial' }] },
+      },
+    };
+
+    const finalEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 2,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-live',
+        state: 'final',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'live final' }],
+          createdAt: 1_975,
+        },
+      },
+    };
+
+    const state = [
+      normalizeSnapshotLoaded(snapshot),
+      ...normalizeGatewayEvent(deltaEvent),
+      ...normalizeGatewayEvent(finalEvent),
+    ].reduce(realtimeReducer, createInitialRealtimeState());
+
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        messageId: 'run-live:assistant',
+        revision: -1,
+        contentParts: [{ type: 'text', text: 'snapshot answer' }],
+      }),
+    ]);
+    expect(Object.keys(state.messages)).toEqual(['run-live:assistant']);
+    expect(state.messages['run-live:assistant']).toMatchObject({
+      status: 'committed',
+      revision: 2,
+      contentParts: [{ type: 'text', text: 'live final' }],
+      createdAt: 1_975,
+    });
+    expect(state.runs['run-live']).toMatchObject({
+      status: 'completed',
+      finalized: true,
+    });
   });
 
   it('preserves chart-only assistant finals recovered from history', async () => {

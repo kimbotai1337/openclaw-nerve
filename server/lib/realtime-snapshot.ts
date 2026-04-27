@@ -26,6 +26,7 @@ const CHART_PREFIX = '[chart:';
 const TTS_SYSTEM_HINT_RE = /\s*\[system: User sent a voice message\.[\s\S]*$/;
 const WEBCHAT_ENVELOPE_RE = /Conversation info \(untrusted metadata\):[\s\S]*?"sender":\s*"[^"]*"\s*\}\s*\n?(?:```\s*\n?)?(?:\n?\[[\w, ]+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]\s*)?/g;
 const UPLOAD_MANIFEST_RE = /\s*<nerve-upload-manifest>([\s\S]*?)<\/nerve-upload-manifest>\s*$/;
+const ACTIVE_SNAPSHOT_ASSISTANT_REVISION = -1;
 
 interface BuildRealtimeSnapshotArgs {
   sessionKey: string;
@@ -699,12 +700,23 @@ export async function buildRealtimeSnapshot(
     }
     : null;
 
+  const liveUpdatableAssistantMessageId = runs.some((run) => run.runId === activeRunId && !run.finalized)
+    ? `${activeRunId}:assistant`
+    : null;
+
   const messages: RealtimeMessageEntity[] = normalizedMessages
     .sort((left, right) => {
       if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
       return left._sortIndex - right._sortIndex;
     })
-    .map(({ _sortIndex: _ignoredSortIndex, ...message }) => message);
+    .map(({ _sortIndex: _ignoredSortIndex, ...message }) => (
+      liveUpdatableAssistantMessageId
+      && message.role === 'assistant'
+      && message.runId === activeRunId
+      && message.messageId === liveUpdatableAssistantMessageId
+        ? { ...message, revision: ACTIVE_SNAPSHOT_ASSISTANT_REVISION }
+        : message
+    ));
 
   return {
     session: {
