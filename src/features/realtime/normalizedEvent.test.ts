@@ -338,12 +338,97 @@ describe('normalized realtime events', () => {
           runId: 'run-clean-final',
           role: 'assistant',
           contentParts: [{ type: 'text', text: 'Summary' }],
+          charts: [
+            {
+              type: 'bar',
+              data: {
+                labels: ['Q1'],
+                values: [1],
+              },
+            },
+          ],
           status: 'committed',
           revision: 13,
           createdAt: 170,
         },
       },
     ]);
+  });
+
+  it('commits chart-only assistant finals with charts preserved', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(222);
+
+    const event: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 9,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-chart-final',
+        seq: 14,
+        state: 'final',
+        message: {
+          role: 'assistant',
+          content: '[chart:{"type":"bar","data":{"labels":["Q1"],"values":[1]}}]',
+          createdAt: 171,
+        },
+      },
+    };
+
+    const normalized = normalizeGatewayEvent(event);
+    const state = apply(normalized);
+
+    expect(normalized).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:222:run-chart-final:final',
+        receivedAt: 222,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-chart-final',
+        status: 'completed',
+        finalized: true,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'chat:222:run-chart-final:committed',
+        receivedAt: 222,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'run-chart-final:assistant',
+          sessionId: 'agent:main:main',
+          runId: 'run-chart-final',
+          role: 'assistant',
+          contentParts: [],
+          charts: [
+            {
+              type: 'bar',
+              data: {
+                labels: ['Q1'],
+                values: [1],
+              },
+            },
+          ],
+          status: 'committed',
+          revision: 14,
+          createdAt: 171,
+        },
+      },
+    ]);
+    expect(state.messages['run-chart-final:assistant']).toMatchObject({
+      contentParts: [],
+      charts: [
+        {
+          type: 'bar',
+          data: {
+            labels: ['Q1'],
+            values: [1],
+          },
+        },
+      ],
+      status: 'committed',
+    });
   });
 
   it('keeps a frame-older late delta from overwriting a seq-less final commit', () => {

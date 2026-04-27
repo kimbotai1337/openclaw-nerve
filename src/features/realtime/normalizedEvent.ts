@@ -47,6 +47,7 @@ function toCommittedMessage(
   runId: string | null,
   messageId: string,
   text: string,
+  charts: RealtimeMessageEntity['charts'],
   revision: number,
   createdAt: number,
 ): RealtimeMessageEntity {
@@ -55,7 +56,8 @@ function toCommittedMessage(
     sessionId,
     runId,
     role: 'assistant',
-    contentParts: [{ type: 'text', text }],
+    contentParts: text.length > 0 ? [{ type: 'text', text }] : [],
+    ...(charts && charts.length > 0 ? { charts } : {}),
     status: 'committed',
     revision,
     createdAt,
@@ -171,7 +173,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
     if (
       !finalMessage ||
       finalMessage.message.role !== 'assistant' ||
-      finalMessage.text.trim().length === 0
+      (finalMessage.text.trim().length === 0 && finalMessage.charts.length === 0)
     ) {
       return [runStatusEvent];
     }
@@ -189,6 +191,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
           classified.runId,
           `${classified.runId}:assistant`,
           finalMessage.text,
+          finalMessage.charts,
           revision,
           resolveCommittedCreatedAt(finalMessage.message, receivedAt),
         ),

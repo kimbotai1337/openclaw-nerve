@@ -1,3 +1,5 @@
+import type { ChartData } from '@/features/charts/extractCharts';
+
 export type RealtimeSource = 'live-chat' | 'live-agent' | 'snapshot' | 'local';
 export type RealtimeTransportStatus = 'connecting' | 'live' | 'degraded' | 'reconnecting' | 'offline';
 export type RealtimeUiStatus = 'live' | 'reconnecting' | 'syncing' | 'degraded' | 'offline';
@@ -48,6 +50,7 @@ export interface RealtimeMessageEntity {
   runId: string | null;
   role: 'user' | 'assistant' | 'system';
   contentParts: RealtimeMessagePart[];
+  charts?: ChartData[];
   status: RealtimeMessageStatus;
   revision: number;
   createdAt: number;
