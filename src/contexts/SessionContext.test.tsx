@@ -12,6 +12,20 @@ let subscribeMock: ReturnType<typeof vi.fn>;
 let connectionStateValue: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' = 'connected';
 let subscribedHandler: ((msg: GatewayEvent) => void) | null = null;
 let soundEnabledValue = true;
+let realtimeStatusValue: 'live' | 'reconnecting' | 'syncing' | 'degraded' | 'offline' = 'live';
+let realtimeStateValue: {
+  connection: {
+    status: 'connecting' | 'live' | 'degraded' | 'reconnecting' | 'offline';
+    lastLiveAt: number;
+    lastDisconnectReason: string | null;
+    reconcileNeeded: boolean;
+    reconnectAttempt: number;
+  };
+  sessions: Record<string, unknown>;
+  runs: Record<string, unknown>;
+  messages: Record<string, unknown>;
+  agentPresence: Record<string, unknown>;
+};
 
 vi.mock('./GatewayContext', () => ({
   useGateway: () => mockUseGateway(),
@@ -19,6 +33,15 @@ vi.mock('./GatewayContext', () => ({
 
 vi.mock('./SettingsContext', () => ({
   useSettings: () => mockUseSettings(),
+}));
+
+vi.mock('./RealtimeContext', () => ({
+  useRealtime: () => ({
+    state: realtimeStateValue,
+    realtimeStatus: realtimeStatusValue,
+    requestSnapshot: vi.fn(async () => {}),
+    dispatch: vi.fn(),
+  }),
 }));
 
 vi.mock('@/features/voice/audio-feedback', () => ({
@@ -96,6 +119,20 @@ describe('SessionContext', () => {
     subscribedHandler = null;
     soundEnabledValue = true;
     connectionStateValue = 'connected';
+    realtimeStatusValue = 'live';
+    realtimeStateValue = {
+      connection: {
+        status: 'live',
+        lastLiveAt: 0,
+        lastDisconnectReason: null,
+        reconcileNeeded: false,
+        reconnectAttempt: 0,
+      },
+      sessions: {},
+      runs: {},
+      messages: {},
+      agentPresence: {},
+    };
 
     rpcMock = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === 'sessions.list') {
@@ -158,6 +195,51 @@ describe('SessionContext', () => {
     screen.getByTestId('spawn').click();
     await waitFor(() => {
       expect(rpcMock).toHaveBeenCalledWith('agents.create', expect.objectContaining({ name: 'Test' }));
+    });
+  });
+
+  it('derives reviewer status from realtime presence instead of raw gateway event branching', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      sessions: {
+        'agent:reviewer:main': {
+          sessionId: 'agent:reviewer:main',
+          status: 'running',
+          agentId: 'reviewer',
+          updatedAt: Date.now(),
+          sourceVersion: 'snapshot-1',
+        },
+      },
+      agentPresence: {
+        'agent:reviewer:main': {
+          sessionId: 'agent:reviewer:main',
+          agentId: 'reviewer',
+          phase: 'streaming',
+          lastSeenAt: Date.now(),
+        },
+      },
+    };
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('STREAMING');
     });
   });
 
@@ -847,15 +929,33 @@ describe('SessionContext', () => {
 
     vi.useFakeTimers();
 
-    await act(async () => {
-      subscribedHandler?.({
-        type: 'event',
-        event: 'chat',
-        payload: {
-          sessionKey: 'agent:reviewer:main',
-          state: 'final',
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      sessions: {
+        'agent:reviewer:main': {
+          sessionId: 'agent:reviewer:main',
+          status: 'completed',
+          agentId: 'reviewer',
+          updatedAt: Date.now(),
+          sourceVersion: 'snapshot-done',
         },
-      });
+      },
+      agentPresence: {
+        'agent:reviewer:main': {
+          sessionId: 'agent:reviewer:main',
+          agentId: 'reviewer',
+          phase: 'completed',
+          lastSeenAt: Date.now(),
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
       await Promise.resolve();
     });
 

@@ -1,11 +1,13 @@
 /* eslint-disable react-refresh/only-export-components -- hook intentionally co-located with provider */
 import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useGateway } from './GatewayContext';
+import { useRealtime } from './RealtimeContext';
 import { useSettings } from './SettingsContext';
 import { getSessionKey, type Session, type AgentLogEntry, type EventEntry, type GatewayEvent, type EventPayload, type AgentEventPayload, type ChatEventPayload, type ContentBlock, type SessionsListResponse, type ChatHistoryResponse, type ChatMessage, type GranularAgentState } from '@/types';
 import { playPing } from '@/features/voice/audio-feedback';
 import { describeToolUse } from '@/utils/helpers';
 import { buildSessionTree } from '@/features/sessions/sessionTree';
+import { isTerminalAgentPhase, selectSessionAgentPresence, selectSessionIsGenerating } from '@/features/realtime/selectors';
 import {
   buildAgentRootSessionKey,
   extractIdentityName,
@@ -19,13 +21,14 @@ import {
   getRootAgentId,
 } from '@/features/sessions/sessionKeys';
 
-const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'started']);
-const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed']);
-
 // Use the full session list for the sidebar so older root chats stay visible.
 const FULL_SESSIONS_LIMIT = 1000;
 const MAIN_SESSION_KEY = 'agent:main:main';
 const SESSIONS_SPAWNED_LIMIT = 500;
+
+function normalizePresencePhase(phase: string | null | undefined): string | null {
+  return typeof phase === 'string' ? phase.trim().toLowerCase() : null;
+}
 
 export type SubagentCleanupMode = 'keep' | 'delete';
 
@@ -64,6 +67,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { connectionState, rpc, subscribe } = useGateway();
+  const { state: realtimeState } = useRealtime();
   const { soundEnabled } = useSettings();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -82,6 +86,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const toolSeenRef = useRef<Map<string, number>>(new Map());
   const doneTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const delayedRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentStatusRef = useRef(agentStatus);
+  const processedPresenceRef = useRef<Record<string, { phase: string | null; lastSeenAt: number }>>({});
 
   // Derive busyState from agentStatus for backward compatibility
   const busyState = useMemo(() => {
@@ -108,6 +114,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
+
+  useEffect(() => {
+    agentStatusRef.current = agentStatus;
+  }, [agentStatus]);
 
   const markSessionRead = useCallback((key: string) => {
     if (!unreadSessionKeysRef.current.has(key)) return;
@@ -348,6 +358,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const setGranularStatus = useCallback((sessionKey: string, state: GranularAgentState) => {
     if (!sessionKey) return;
+    const existing = agentStatusRef.current[sessionKey];
+    if (
+      existing
+      && existing.status === state.status
+      && existing.toolName === state.toolName
+      && existing.toolDescription === state.toolDescription
+    ) {
+      return;
+    }
     // Cancel any pending DONE→IDLE timeout for this session
     if (doneTimeoutsRef.current[sessionKey]) {
       clearTimeout(doneTimeoutsRef.current[sessionKey]);
@@ -370,9 +389,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }, 3000);
     }
     setAgentStatus(prev => {
-      const existing = prev[sessionKey];
+      const existingState = prev[sessionKey];
       // Optimization: skip update if status/tool haven't changed
-      if (existing && existing.status === state.status && existing.toolName === state.toolName) return prev;
+      if (
+        existingState
+        && existingState.status === state.status
+        && existingState.toolName === state.toolName
+        && existingState.toolDescription === state.toolDescription
+      ) return prev;
       return { ...prev, [sessionKey]: state };
     });
   }, [markSessionUnread]);
@@ -663,6 +687,79 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, 1500);
   }, []);
 
+  useEffect(() => {
+    const nextProcessedPresence: Record<string, { phase: string | null; lastSeenAt: number }> = {};
+
+    for (const session of sessionsRef.current) {
+      const sessionKey = getSessionKey(session);
+      if (!sessionKey) continue;
+
+      const presence = selectSessionAgentPresence(realtimeState, sessionKey);
+      const phase = normalizePresencePhase(presence?.phase);
+      const lastSeenAt = presence?.lastSeenAt ?? 0;
+      const existing = agentStatusRef.current[sessionKey];
+      const previousPresence = processedPresenceRef.current[sessionKey];
+
+      if (phase === 'streaming') {
+        setGranularStatus(sessionKey, { status: 'STREAMING', since: lastSeenAt || Date.now() });
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (phase === 'error') {
+        if (previousPresence?.phase !== phase || previousPresence.lastSeenAt !== lastSeenAt) {
+          setGranularStatus(sessionKey, { status: 'ERROR', since: lastSeenAt || Date.now() });
+        }
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (phase && isTerminalAgentPhase(phase) && phase !== 'idle') {
+        if (previousPresence?.phase !== phase || previousPresence.lastSeenAt !== lastSeenAt) {
+          setGranularStatus(sessionKey, { status: 'DONE', since: lastSeenAt || Date.now() });
+        }
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (phase && phase !== 'idle') {
+        setGranularStatus(sessionKey, {
+          status: 'THINKING',
+          toolName: existing?.status === 'THINKING' ? existing.toolName : undefined,
+          toolDescription: existing?.status === 'THINKING' ? existing.toolDescription : undefined,
+          since: lastSeenAt || Date.now(),
+        });
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (selectSessionIsGenerating(realtimeState, sessionKey)) {
+        setGranularStatus(sessionKey, {
+          status: existing?.status === 'STREAMING' ? 'STREAMING' : 'THINKING',
+          toolName: existing?.status === 'THINKING' ? existing.toolName : undefined,
+          toolDescription: existing?.status === 'THINKING' ? existing.toolDescription : undefined,
+          since: existing?.since ?? Date.now(),
+        });
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (phase === 'idle') {
+        if (existing?.status !== 'DONE' && existing?.status !== 'ERROR' && existing?.status !== 'IDLE') {
+          setGranularStatus(sessionKey, { status: 'IDLE', since: lastSeenAt || Date.now() });
+        }
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (existing && existing.status !== 'DONE' && existing.status !== 'ERROR' && existing.status !== 'IDLE') {
+        setGranularStatus(sessionKey, { status: 'IDLE', since: Date.now() });
+      }
+    }
+
+    processedPresenceRef.current = nextProcessedPresence;
+  }, [displaySessions, realtimeState, setGranularStatus]);
+
   // Subscribe to gateway events for granular status tracking + session state sync + agent log + event log
   useEffect(() => {
     const unsub = subscribe((msg: GatewayEvent) => {
@@ -684,10 +781,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
           if (ap.stream === 'lifecycle') {
             const phase = (ap.data as Record<string, unknown> | undefined)?.phase;
-            if (phase === 'start') {
-              setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
-            } else if (phase === 'end') {
-              setGranularStatus(sk, { status: 'DONE', since: Date.now() });
+            if (phase === 'end') {
               if (isTopLevelAgentSessionKey(sk)) {
                 markSessionUnread(sk);
                 pingSession(sk);
@@ -695,7 +789,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               refreshSessions();
               scheduleDelayedRefresh();
             } else if (phase === 'error') {
-              setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
               if (isTopLevelAgentSessionKey(sk)) {
                 markSessionUnread(sk);
                 pingSession(sk);
@@ -714,8 +807,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             } else if (ap.data.phase === 'result') {
               setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             }
-          } else if (ap.stream === 'assistant') {
-            setGranularStatus(sk, { status: 'STREAMING', since: Date.now() });
           }
         }
 
@@ -725,14 +816,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const state = cp.state || '';
 
           if (state === 'started') {
-            setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             if (isTopLevelAgentSessionKey(sk)) {
               markSessionUnread(sk);
             }
-          } else if (state === 'delta') {
-            setGranularStatus(sk, { status: 'STREAMING', since: Date.now() });
           } else if (state === 'final') {
-            setGranularStatus(sk, { status: 'DONE', since: Date.now() });
             if (isTopLevelAgentSessionKey(sk)) {
               markSessionUnread(sk);
               pingSession(sk);
@@ -741,38 +828,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // Delayed refresh to catch token counts that may not be available immediately.
             scheduleDelayedRefresh();
           } else if (state === 'error') {
-            setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
             if (isTopLevelAgentSessionKey(sk)) {
               markSessionUnread(sk);
               pingSession(sk);
             }
-          } else if (state === 'aborted') {
-            setGranularStatus(sk, { status: 'IDLE', since: Date.now() });
           }
         }
 
-        // Also handle legacy state strings for backward compatibility
         const state = evt === 'agent'
           ? ((typedPayload as AgentEventPayload).state || (typedPayload as AgentEventPayload).agentState || '')
           : ((typedPayload as ChatEventPayload).state || '');
-
-        // Map legacy state strings to granular status (only if not already handled above)
-        if (evt === 'agent' && !(typedPayload as AgentEventPayload).stream) {
-          if (BUSY_STATES.has(state)) {
-            setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
-          } else if (IDLE_STATES.has(state)) {
-            if (state === 'error') {
-              setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
-            } else if (state === 'aborted') {
-              setGranularStatus(sk, { status: 'IDLE', since: Date.now() });
-            } else {
-              setGranularStatus(sk, { status: 'DONE', since: Date.now() });
-            }
-            if (state === 'final' || state === 'done' || state === 'completed') {
-              refreshSessions();
-            }
-          }
-        }
 
         const updates = extractSessionUpdates(state || undefined, typedPayload);
         if (Object.keys(updates).length > 0) {

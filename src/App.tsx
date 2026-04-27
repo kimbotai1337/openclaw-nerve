@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
 import { useGateway } from '@/contexts/GatewayContext';
+import { useRealtime } from '@/contexts/RealtimeContext';
 import { useSessionContext, type SpawnSessionOpts } from '@/contexts/SessionContext';
 import { useChat } from '@/contexts/ChatContext';
 import { useSettings, type STTInputMode } from '@/contexts/SettingsContext';
@@ -95,6 +96,7 @@ export default function App({ onLogout }: AppProps) {
   const {
     connectionState, connectError, reconnectAttempt, model, sparkline,
   } = useGateway();
+  const { realtimeStatus } = useRealtime();
 
   // Session state
   const {
@@ -1115,6 +1117,7 @@ export default function App({ onLogout }: AppProps) {
       <div className="boot-panel" style={{ transitionDelay: '200ms' }}>
         <StatusBar
           connectionState={connectionState}
+          realtimeStatus={realtimeStatus}
           sessionCount={sessions.length}
           sparkline={sparkline}
           contextTokens={contextTokens}

@@ -282,6 +282,12 @@ vi.mock('@/features/connect/ConnectDialog', () => ({
   ConnectDialog: () => null,
 }));
 
+vi.mock('@/contexts/RealtimeContext', () => ({
+  useRealtime: () => ({
+    realtimeStatus: 'live',
+  }),
+}));
+
 vi.mock('@/components/TopBar', () => ({
   TopBar: ({
     showKanbanView,

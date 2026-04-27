@@ -2,11 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { ContextMeter } from './ContextMeter';
 import { UpdateBadge } from './UpdateBadge';
 import { useGateway } from '@/contexts/GatewayContext';
+import type { RealtimeUiStatus } from '@/features/realtime/types';
 
 /** Props for {@link StatusBar}. */
 interface StatusBarProps {
   /** Current WebSocket connection state to the gateway. */
   connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+  /** User-facing realtime state derived from transport + reconcile truth. */
+  realtimeStatus: RealtimeUiStatus;
   /** Number of active agent sessions. */
   sessionCount: number;
   /** ASCII sparkline string rendered at the right edge of the bar. */
@@ -47,7 +50,7 @@ async function fetchServerInfo(): Promise<{ serverTime?: number; gatewayStartedA
  * Shows connection state, server time, session count, gateway uptime,
  * an optional context-window meter, a sparkline, and the app version.
  */
-export function StatusBar({ connectionState, sessionCount, sparkline, contextTokens, contextLimit }: StatusBarProps) {
+export function StatusBar({ connectionState, realtimeStatus, sessionCount, sparkline, contextTokens, contextLimit }: StatusBarProps) {
   useGateway(); // Keep gateway context connected
 
   // Server time: offset between local clock and server clock
@@ -58,7 +61,7 @@ export function StatusBar({ connectionState, sessionCount, sparkline, contextTok
   const [now, setNow] = useState(() => Date.now());
 
   // Use connectionState as key to trigger CSS animation on change
-  const flashKey = connectionState;
+  const flashKey = `${connectionState}:${realtimeStatus}`;
 
   // Sync server info helper
   const syncServerInfo = useCallback(async (signal: { cancelled: boolean }) => {
@@ -89,18 +92,22 @@ export function StatusBar({ connectionState, sessionCount, sparkline, contextTok
     return () => clearInterval(iv);
   }, []);
 
-  const statusColor = connectionState === 'connected'
+  const statusColor = realtimeStatus === 'live'
     ? 'border-green/30 bg-green/10 text-green'
-    : connectionState === 'connecting' || connectionState === 'reconnecting'
+    : realtimeStatus === 'syncing' || realtimeStatus === 'reconnecting'
     ? 'border-orange/30 bg-orange/10 text-orange animate-pulse-dot'
+    : realtimeStatus === 'degraded'
+    ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-600'
     : 'border-red/30 bg-red/10 text-red';
 
-  const statusLabel = connectionState === 'connected'
-    ? 'CONNECTED'
-    : connectionState === 'connecting'
-    ? 'CONNECTING'
-    : connectionState === 'reconnecting'
+  const statusLabel = realtimeStatus === 'live'
+    ? 'LIVE'
+    : realtimeStatus === 'syncing'
+    ? 'SYNCING'
+    : realtimeStatus === 'reconnecting'
     ? 'RECONNECTING'
+    : realtimeStatus === 'degraded'
+    ? 'DEGRADED'
     : 'OFFLINE';
 
   // Server time = local time + offset
