@@ -140,16 +140,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     getAllMessages,
     applyMessageWindow,
   } = msgHook;
-  const repairVisibleHistory = useCallback(async (sessionId: string) => {
-    await loadHistory(sessionId);
-  }, [loadHistory]);
 
   const recoveryHook = useChatRecovery({
+    rpc,
     requestSnapshot,
-    repairVisibleHistory,
     currentSessionRef,
     isGeneratingRef,
     activeRunIdRef,
+    runsRef,
+    getAllMessages,
+    applyMessageWindow,
     setStream: streamHook.setStream,
   });
   const {

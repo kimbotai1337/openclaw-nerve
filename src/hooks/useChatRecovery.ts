@@ -2,13 +2,23 @@
  * useChatRecovery — Recovery/retry logic extracted from ChatContext
  *
  * Manages stream recovery on disconnect, gap detection recovery via
- * snapshot reconcile, generation-based stale-guard, and reconnect state
- * tracking.
+ * snapshot reconcile plus guarded visible transcript repair, generation-based
+ * stale-guard, and reconnect state tracking.
  */
 import { useRef, useCallback, useEffect, useMemo } from 'react';
-import type { RecoveryReason } from '@/features/chat/operations';
+import { loadChatHistory, mergeRecoveredTail } from '@/features/chat/operations';
+import type { RecoveryReason, RunState } from '@/features/chat/operations';
+import type { ChatMsg } from '@/features/chat/types';
 import type { ChatStreamState } from '@/contexts/ChatContext';
 import type { ReconcileReason } from '@/features/realtime/types';
+
+export const RECOVERY_LIMITS: Record<RecoveryReason, number> = {
+  'unrenderable-final': 40,
+  'frame-gap': 80,
+  'chat-gap': 80,
+  reconnect: 120,
+  'subagent-complete': 500,
+};
 
 // ─── Internal types ─────────────────────────────────────────────────────────────
 
@@ -21,11 +31,14 @@ interface RecoveryState {
 // ─── Hook ───────────────────────────────────────────────────────────────────────
 
 interface UseChatRecoveryDeps {
+  rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   requestSnapshot: (sessionId: string, reason: ReconcileReason) => Promise<void>;
-  repairVisibleHistory: (sessionId: string) => Promise<void>;
   currentSessionRef: React.RefObject<string>;
   isGeneratingRef: React.RefObject<boolean>;
   activeRunIdRef: React.RefObject<string | null>;
+  runsRef: React.RefObject<Map<string, RunState>>;
+  getAllMessages: () => ChatMsg[];
+  applyMessageWindow: (all: ChatMsg[], resetVisibleWindow?: boolean) => void;
   setStream: React.Dispatch<React.SetStateAction<ChatStreamState>>;
 }
 
@@ -42,11 +55,14 @@ function toReconcileReason(reason: RecoveryReason): ReconcileReason {
 }
 
 export function useChatRecovery({
+  rpc,
   requestSnapshot,
-  repairVisibleHistory,
   currentSessionRef,
   isGeneratingRef,
   activeRunIdRef,
+  runsRef,
+  getAllMessages,
+  applyMessageWindow,
   setStream,
 }: UseChatRecoveryDeps) {
   const recoveryRef = useRef<RecoveryState>({ timer: null, inFlight: false, reason: null });
@@ -89,9 +105,33 @@ export function useChatRecovery({
 
         if (capturedGeneration !== recoveryGenerationRef.current) return;
 
-        await repairVisibleHistory(sessionId);
+        const recovered = await loadChatHistory({
+          rpc,
+          sessionKey: sessionId,
+          limit: RECOVERY_LIMITS[reason],
+        });
 
         if (capturedGeneration !== recoveryGenerationRef.current) return;
+
+        const activeRun = activeRunIdRef.current;
+        const activeBuffer = activeRun
+          ? runsRef.current.get(activeRun)?.bufferText || ''
+          : '';
+        const filtered = activeBuffer.length > 0
+          ? recovered.filter((msg) => {
+            if (msg.role !== 'assistant') return true;
+            if (msg.isThinking) return true;
+            if (msg.toolGroup || msg.intermediate) return true;
+
+            const text = (msg.rawText || '').trim();
+            if (text.length >= 20 && activeBuffer.includes(text)) return false;
+            if (text && text.length < 20 && activeBuffer.trim() === text) return false;
+            return true;
+          })
+          : recovered;
+
+        const merged = mergeRecoveredTail(getAllMessages(), filtered);
+        applyMessageWindow(merged, false);
       } catch (err) {
         console.debug('[ChatContext] Recovery failed:', err);
       } finally {
@@ -100,7 +140,17 @@ export function useChatRecovery({
         setStream(prev => ({ ...prev, isRecovering: false, recoveryReason: null }));
       }
     }, 180);
-  }, [clearRecoveryTimer, currentSessionRef, repairVisibleHistory, requestSnapshot, setStream]);
+  }, [
+    activeRunIdRef,
+    applyMessageWindow,
+    clearRecoveryTimer,
+    currentSessionRef,
+    getAllMessages,
+    requestSnapshot,
+    rpc,
+    runsRef,
+    setStream,
+  ]);
 
   /** Increment the recovery generation counter (invalidates in-flight recoveries). */
   const incrementGeneration = useCallback(() => {
