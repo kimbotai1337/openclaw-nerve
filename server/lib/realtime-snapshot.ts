@@ -53,6 +53,23 @@ interface RealtimeMessagePart {
   text: string;
 }
 
+interface UploadAttachmentPolicy {
+  forwardToSubagents: boolean;
+}
+
+interface UploadAttachmentDescriptor {
+  id: string;
+  origin: 'upload' | 'server_path';
+  mode: 'inline' | 'file_reference';
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  inline?: Record<string, unknown>;
+  reference?: Record<string, unknown>;
+  preparation?: Record<string, unknown>;
+  policy: UploadAttachmentPolicy;
+}
+
 interface RealtimeSessionEntity {
   sessionId: string;
   status: string;
@@ -77,6 +94,7 @@ interface RealtimeMessageEntity {
   role: 'user' | 'assistant' | 'system';
   contentParts: RealtimeMessagePart[];
   charts?: ChartData[];
+  uploadAttachments?: UploadAttachmentDescriptor[];
   status: 'streaming' | 'committed' | 'superseded';
   revision: number;
   createdAt: number;
@@ -145,6 +163,7 @@ interface GatewayChatHistoryResponse {
 }
 
 interface NormalizedHistoryMessage extends RealtimeMessageEntity {
+  _hasExplicitMessageId: boolean;
   _sortIndex: number;
 }
 
@@ -222,12 +241,6 @@ function getMessageRunId(message: GatewayHistoryMessage): string | null {
     ?? trimToNull(message.metadata?.runId);
 }
 
-function getMessageId(message: GatewayHistoryMessage, fallback: string): string {
-  return trimToNull(message.messageId)
-    ?? trimToNull(message.id)
-    ?? fallback;
-}
-
 function extractMessageText(message: GatewayHistoryMessage): string {
   if (typeof message.content === 'string') return message.content;
   if (Array.isArray(message.content)) {
@@ -248,23 +261,78 @@ function extractTtsMarkers(text: string): { cleaned: string; ttsText: string | n
   return { cleaned: cleaned.trim(), ttsText };
 }
 
-function stripUploadManifest(text: string): string {
-  const match = text.match(UPLOAD_MANIFEST_RE);
-  if (!match) return text;
+function extractUploadAttachments(rawText: string): {
+  cleanedText: string;
+  uploadAttachments?: UploadAttachmentDescriptor[];
+} {
+  const match = rawText.match(UPLOAD_MANIFEST_RE);
+  if (!match) return { cleanedText: rawText };
+
+  const cleanedText = rawText.replace(UPLOAD_MANIFEST_RE, '').trimEnd();
 
   try {
-    JSON.parse(match[1]);
-    return text.replace(UPLOAD_MANIFEST_RE, '').trimEnd();
+    const parsed = JSON.parse(match[1]) as { attachments?: UploadAttachmentDescriptor[] };
+    if (!Array.isArray(parsed.attachments) || parsed.attachments.length === 0) {
+      return { cleanedText };
+    }
+    return {
+      cleanedText,
+      uploadAttachments: parsed.attachments,
+    };
   } catch {
-    return text;
+    return { cleanedText: rawText };
   }
 }
 
-function normalizeUserHistoryText(rawText: string): string {
+function normalizeUserHistoryText(rawText: string): {
+  cleanedText: string;
+  uploadAttachments?: UploadAttachmentDescriptor[];
+} {
   const withoutTtsHint = rawText.replace(TTS_SYSTEM_HINT_RE, '');
   const withoutEnvelope = withoutTtsHint.replace(WEBCHAT_ENVELOPE_RE, '');
   const withoutVoicePrefix = withoutEnvelope.replace(/^\[voice\]\s*/, '');
-  return stripUploadManifest(withoutVoicePrefix);
+  return extractUploadAttachments(withoutVoicePrefix);
+}
+
+function buildAssistantHistoryFallbackMessageId(
+  sessionKey: string,
+  runId: string,
+  createdAt: number,
+  index: number,
+): string {
+  return `${sessionKey}:${runId}:assistant:${createdAt}:${index}`;
+}
+
+function assignAssistantFallbackIds(messages: NormalizedHistoryMessage[]): void {
+  const noIdAssistantMessagesByRun = new Map<string, NormalizedHistoryMessage[]>();
+
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !message.runId || message._hasExplicitMessageId) continue;
+    const group = noIdAssistantMessagesByRun.get(message.runId) ?? [];
+    group.push(message);
+    noIdAssistantMessagesByRun.set(message.runId, group);
+  }
+
+  for (const [runId, group] of noIdAssistantMessagesByRun) {
+    group.sort((left, right) => {
+      if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+      return left._sortIndex - right._sortIndex;
+    });
+
+    const latest = group[group.length - 1];
+    if (!latest) continue;
+
+    for (const message of group) {
+      message.messageId = message === latest
+        ? `${runId}:assistant`
+        : buildAssistantHistoryFallbackMessageId(
+          message.sessionId,
+          runId,
+          message.createdAt,
+          message._sortIndex,
+        );
+    }
+  }
 }
 
 function isValidChartData(value: unknown): value is ChartData {
@@ -384,26 +452,27 @@ function normalizeHistoryMessage(
   const role = trimToNull(message.role)?.toLowerCase();
   if (role !== 'user' && role !== 'assistant' && role !== 'system') return null;
 
-  const rawText = role === 'user'
+  const normalizedUserPayload = role === 'user'
     ? normalizeUserHistoryText(extractMessageText(message))
-    : extractMessageText(message);
+    : null;
+  const rawText = normalizedUserPayload?.cleanedText ?? extractMessageText(message);
+  const uploadAttachments = normalizedUserPayload?.uploadAttachments;
   const { cleaned: ttsStripped } = extractTtsMarkers(rawText);
   const { cleaned, charts } = extractChartMarkers(ttsStripped);
   const trimmed = cleaned.trim();
 
   if (role === 'assistant' && INTERNAL_CONTROL_REPLY_RE.test(trimmed)) return null;
   if (role === 'user' && isInternalWakeBundle(trimmed)) return null;
-  if (!trimmed && charts.length === 0) return null;
+  if (!trimmed && charts.length === 0 && (!uploadAttachments || uploadAttachments.length === 0)) return null;
 
   const createdAt = getMessageCreatedAt(message) ?? recoveredAt + index;
   const runId = getMessageRunId(message);
+  const explicitMessageId = trimToNull(message.messageId)
+    ?? trimToNull(message.id);
   const fallbackMessageId = role === 'assistant' && runId
-    ? `${runId}:assistant`
+    ? buildAssistantHistoryFallbackMessageId(sessionKey, runId, createdAt, index)
     : `${sessionKey}:${runId ?? 'norun'}:${role}:${createdAt}:${index}`;
-  const messageId = getMessageId(
-    message,
-    fallbackMessageId,
-  );
+  const messageId = explicitMessageId ?? fallbackMessageId;
 
   return {
     messageId,
@@ -412,9 +481,11 @@ function normalizeHistoryMessage(
     role,
     contentParts: trimmed ? [{ type: 'text', text: trimmed }] : [],
     ...(charts.length > 0 ? { charts } : {}),
+    ...(uploadAttachments && uploadAttachments.length > 0 ? { uploadAttachments } : {}),
     status: 'committed',
     revision: createdAt,
     createdAt,
+    _hasExplicitMessageId: explicitMessageId !== null,
     _sortIndex: index,
   };
 }
@@ -544,13 +615,16 @@ export async function buildRealtimeSnapshot(
   const normalizedMessages = rawMessages
     .map((message, index) => normalizeHistoryMessage(message, sessionKey, recoveredAt, index))
     .filter((message): message is NormalizedHistoryMessage => Boolean(message));
+  assignAssistantFallbackIds(normalizedMessages);
 
   const runAccumulators = new Map<string, RunAccumulator>();
   for (const message of normalizedMessages) {
     if (!message.runId) continue;
     const existing = runAccumulators.get(message.runId);
     if (existing) {
-      existing.messageIds.push(message.messageId);
+      if (!existing.messageIds.includes(message.messageId)) {
+        existing.messageIds.push(message.messageId);
+      }
       existing.lastEventAt = Math.max(existing.lastEventAt, message.createdAt);
       continue;
     }
@@ -624,7 +698,7 @@ export async function buildRealtimeSnapshot(
       if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
       return left._sortIndex - right._sortIndex;
     })
-    .map(({ _sortIndex: _ignored, ...message }) => message);
+    .map(({ _hasExplicitMessageId: _ignoredHasExplicitMessageId, _sortIndex: _ignoredSortIndex, ...message }) => message);
 
   return {
     session: {

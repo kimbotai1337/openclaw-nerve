@@ -436,6 +436,68 @@ describe('buildRealtimeSnapshot', () => {
     });
   });
 
+  it('keeps fallback assistant ids unique within a run while reserving the live id for the latest message', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(14_500);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'done',
+              updatedAt: 14_400,
+              latestRunId: 'run-multi-assistant',
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return {
+          messages: [
+            {
+              role: 'assistant',
+              content: 'earlier answer',
+              createdAt: 14_100,
+              runId: 'run-multi-assistant',
+            },
+            {
+              role: 'assistant',
+              content: 'latest answer',
+              createdAt: 14_200,
+              runId: 'run-multi-assistant',
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.messages).toHaveLength(2);
+    expect(new Set(snapshot.messages.map((message) => message.messageId)).size).toBe(2);
+    expect(snapshot.messages[0]?.messageId).not.toBe('run-multi-assistant:assistant');
+    expect(snapshot.messages[1]?.messageId).toBe('run-multi-assistant:assistant');
+    expect(snapshot.runs).toEqual([
+      {
+        runId: 'run-multi-assistant',
+        sessionId: 'agent:main:main',
+        status: 'completed',
+        messageIds: [
+          snapshot.messages[0]!.messageId,
+          'run-multi-assistant:assistant',
+        ],
+        lastEventAt: 14_400,
+        finalized: true,
+      },
+    ]);
+    expect(new Set(snapshot.runs[0]!.messageIds).size).toBe(snapshot.runs[0]!.messageIds.length);
+  });
+
   it('strips user transport decorations that loadHistory already cleans', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(15_000);
 
@@ -474,6 +536,68 @@ describe('buildRealtimeSnapshot', () => {
       expect.objectContaining({
         role: 'user',
         contentParts: [{ type: 'text', text: 'Hello from voice' }],
+      }),
+    ]);
+  });
+
+  it('preserves manifest-only user messages as attachment-only realtime entities', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(15_500);
+
+    const manifestAttachments = [
+      {
+        id: 'att-path',
+        origin: 'server_path',
+        mode: 'file_reference',
+        name: 'capture.mov',
+        mimeType: 'video/quicktime',
+        sizeBytes: 8_000_000,
+        reference: {
+          kind: 'local_path',
+          path: '/workspace/capture.mov',
+          uri: 'file:///workspace/capture.mov',
+        },
+        policy: {
+          forwardToSubagents: true,
+        },
+      },
+    ];
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'idle',
+              updatedAt: 15_400,
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return {
+          messages: [
+            {
+              role: 'user',
+              createdAt: 15_300,
+              content: `<nerve-upload-manifest>${JSON.stringify({ version: 1, attachments: manifestAttachments })}</nerve-upload-manifest>`,
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        contentParts: [],
+        uploadAttachments: manifestAttachments,
       }),
     ]);
   });

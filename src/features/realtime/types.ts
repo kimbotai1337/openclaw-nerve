@@ -1,4 +1,5 @@
 import type { ChartData } from '@/features/charts/extractCharts';
+import type { UploadAttachmentDescriptor } from '@/features/chat/types';
 
 export type RealtimeSource = 'live-chat' | 'live-agent' | 'snapshot' | 'local';
 export type RealtimeTransportStatus = 'connecting' | 'live' | 'degraded' | 'reconnecting' | 'offline';
@@ -51,6 +52,7 @@ export interface RealtimeMessageEntity {
   role: 'user' | 'assistant' | 'system';
   contentParts: RealtimeMessagePart[];
   charts?: ChartData[];
+  uploadAttachments?: UploadAttachmentDescriptor[];
   status: RealtimeMessageStatus;
   revision: number;
   createdAt: number;
