@@ -381,7 +381,7 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(pendingState.connection.status).toBe('live');
-    expect(pendingState.connection.reconcileNeeded).toBe(false);
+    expect(pendingState.connection.reconcileNeeded).toBe(true);
     expect(pendingState.connection.lastLiveAt).toBe(3);
 
     const mergedState = realtimeReducer(pendingState, {
@@ -448,7 +448,7 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(state.connection.status).toBe('degraded');
-    expect(state.connection.reconcileNeeded).toBe(false);
+    expect(state.connection.reconcileNeeded).toBe(true);
     expect(state.connection.lastDisconnectReason).toBe('slow-link');
   });
 
@@ -535,7 +535,7 @@ describe('realtimeReducer', () => {
     expect(state.messages['assistant-live']?.messageId).toBe('assistant-live');
   });
 
-  it('keeps reconcileNeeded set when a requested snapshot is rejected as stale', () => {
+  it('ends syncing when a requested snapshot is stale but local state is newer', () => {
     const staleSnapshot: RealtimeSnapshotPayload = {
       session: {
         sessionId: 'agent:main:main',
@@ -600,7 +600,7 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(state.sessions['agent:main:main']?.status).toBe('running');
-    expect(state.connection.reconcileNeeded).toBe(true);
+    expect(state.connection.reconcileNeeded).toBe(false);
   });
 
   it('keeps finalized runs terminal and ignores duplicate run.created events', () => {
