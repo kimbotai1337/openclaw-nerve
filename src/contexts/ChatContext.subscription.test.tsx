@@ -57,7 +57,7 @@ describe('ChatContext subscription stability', () => {
     }));
 
     const mod = await import('./ChatContext');
-    return { ...mod, gatewayState, subscribeMock, loadChatHistoryMock };
+    return { ...mod, gatewayState, subscribeMock, loadChatHistoryMock, requestSnapshotMock };
   }
 
   it('keeps a single subscribe registration after handleSend-triggered rerender', async () => {
@@ -125,6 +125,65 @@ describe('ChatContext subscription stability', () => {
         sessionKey: 'main',
         limit: 500,
       });
+    });
+  });
+
+  it('does not run the legacy full history reload during generating reconnect recovery', async () => {
+    const { ChatProvider, useChat, gatewayState, loadChatHistoryMock, requestSnapshotMock } = await setup();
+    gatewayState.connectionState = 'connected';
+
+    let send: ((text: string, images?: ImageAttachment[]) => Promise<void>) | null = null;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        send = chat.handleSend;
+      }, [chat]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(send).not.toBeNull());
+
+    await act(async () => {
+      await send!('hello');
+    });
+
+    loadChatHistoryMock.mockClear();
+    requestSnapshotMock.mockClear();
+
+    gatewayState.connectionState = 'reconnecting';
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    gatewayState.connectionState = 'connected';
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(requestSnapshotMock).toHaveBeenCalledWith('main', 'reconnect');
+    });
+
+    expect(loadChatHistoryMock).toHaveBeenCalledWith({
+      rpc: expect.any(Function),
+      sessionKey: 'main',
+      limit: 120,
+    });
+    expect(loadChatHistoryMock).not.toHaveBeenCalledWith({
+      rpc: expect.any(Function),
+      sessionKey: 'main',
+      limit: 500,
     });
   });
 });

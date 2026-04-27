@@ -142,6 +142,44 @@ describe('useChatRecovery', () => {
     expect(applyMessageWindow).toHaveBeenCalledWith([], false);
   });
 
+  it('starts visible repair without waiting for snapshot reconcile to settle', async () => {
+    const requestSnapshot = vi.fn(() => new Promise<void>(() => {}));
+    const rpc = vi.fn(async () => ({}));
+    const applyMessageWindow = vi.fn();
+    loadChatHistoryMock.mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useChatRecovery({
+        rpc,
+        requestSnapshot,
+        currentSessionRef: { current: 'agent:main:main' },
+        isGeneratingRef: { current: true },
+        activeRunIdRef: { current: 'run-1' },
+        runsRef: { current: new Map<string, RunState>() },
+        getAllMessages: () => [],
+        applyMessageWindow,
+        setStream: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.triggerRecovery('reconnect');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180);
+      await Promise.resolve();
+    });
+
+    expect(requestSnapshot).toHaveBeenCalledWith('agent:main:main', 'reconnect');
+    expect(loadChatHistoryMock).toHaveBeenCalledWith({
+      rpc,
+      sessionKey: 'agent:main:main',
+      limit: 120,
+    });
+    expect(applyMessageWindow).toHaveBeenCalledWith([], false);
+  });
+
   it('drops stale pending recovery when the generation changes first', async () => {
     const requestSnapshot = vi.fn(async () => {});
     const applyMessageWindow = vi.fn();

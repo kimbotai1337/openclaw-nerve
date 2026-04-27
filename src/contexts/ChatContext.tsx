@@ -192,6 +192,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeRunIdRef.current = null;
     lastGatewaySeqRef.current = null;
     lastChatSeqRef.current = null;
+    reconnectRecoveryOwnsHistoryRef.current = false;
     if (toolResultRefreshRef.current) {
       clearTimeout(toolResultRefreshRef.current);
       toolResultRefreshRef.current = null;
@@ -202,17 +203,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ─── Load history on connect / recover on reconnect ───────────────────────
   const previousConnectionStateRef = useRef(connectionState);
   const historyLoadConnectionStateRef = useRef<typeof connectionState>('disconnected');
+  const reconnectRecoveryOwnsHistoryRef = useRef(false);
   useEffect(() => {
     const prevConnection = previousConnectionStateRef.current;
 
     if (connectionState === 'connected') {
-      if (prevConnection === 'reconnecting' && wasGeneratingOnDisconnect()) {
+      const shouldRecoverReconnect =
+        prevConnection === 'reconnecting' && wasGeneratingOnDisconnect();
+      reconnectRecoveryOwnsHistoryRef.current = shouldRecoverReconnect;
+
+      if (shouldRecoverReconnect) {
         triggerRecovery('reconnect');
       }
       clearDisconnectState();
     }
 
     if (connectionState === 'reconnecting' && prevConnection === 'connected') {
+      reconnectRecoveryOwnsHistoryRef.current = false;
       captureDisconnectState();
     }
 
@@ -230,10 +237,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     historyLoadConnectionStateRef.current = connectionState;
 
     if (connectionState !== 'connected' || !currentSession) return;
-    if (prevConnection === 'reconnecting' && wasGeneratingOnDisconnect()) return;
+    if (prevConnection === 'reconnecting' && reconnectRecoveryOwnsHistoryRef.current) {
+      reconnectRecoveryOwnsHistoryRef.current = false;
+      return;
+    }
 
     void loadHistory(currentSession);
-  }, [connectionState, currentSession, loadHistory, wasGeneratingOnDisconnect]);
+    reconnectRecoveryOwnsHistoryRef.current = false;
+  }, [connectionState, currentSession, loadHistory]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────
   const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;

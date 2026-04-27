@@ -101,11 +101,9 @@ export function useChatRecovery({
       recoveryRef.current.inFlight = true;
       try {
         const sessionId = currentSessionRef.current;
-        try {
-          await requestSnapshot(sessionId, toReconcileReason(reason));
-        } catch (err) {
+        void requestSnapshot(sessionId, toReconcileReason(reason)).catch((err) => {
           console.debug('[ChatContext] Snapshot recovery failed, falling back to visible repair:', err);
-        }
+        });
 
         if (capturedGeneration !== recoveryGenerationRef.current) return;
 
