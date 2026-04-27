@@ -9,12 +9,20 @@ import {
 } from './selectors';
 
 describe('realtime selectors', () => {
-  it('returns syncing when reconcile is in progress', () => {
+  it('returns syncing while reconcile is still pending, even if transport is degraded', () => {
     const state = createInitialRealtimeState();
-    state.connection.status = 'reconnecting';
+    state.connection.status = 'degraded';
     state.connection.reconcileNeeded = true;
 
     expect(selectRealtimeStatus(state)).toBe('syncing');
+  });
+
+  it('returns degraded once reconcile is no longer pending', () => {
+    const state = createInitialRealtimeState();
+    state.connection.status = 'degraded';
+    state.connection.reconcileNeeded = false;
+
+    expect(selectRealtimeStatus(state)).toBe('degraded');
   });
 
   it('orders messages by revision and commit state for a session', () => {

@@ -81,6 +81,42 @@ describe('normalized realtime events', () => {
     ]);
   });
 
+  it('assigns unique fallback revisions and event ids to same-millisecond seq-less deltas', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(141);
+
+    const firstEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-fallback',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'first' }] },
+      },
+    };
+
+    const secondEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-fallback',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'second' }] },
+      },
+    };
+
+    const first = normalizeGatewayEvent(firstEvent);
+    const second = normalizeGatewayEvent(secondEvent);
+
+    expect(first[0]?.eventId).not.toBe(second[0]?.eventId);
+    expect(first[1]?.eventId).not.toBe(second[1]?.eventId);
+    expect(first[1]).toMatchObject({ type: 'message.delta_applied', revision: expect.any(Number) });
+    expect(second[1]).toMatchObject({ type: 'message.delta_applied', revision: expect.any(Number) });
+    expect((second[1] as Extract<RealtimeEvent, { type: 'message.delta_applied' }>).revision)
+      .toBeGreaterThan((first[1] as Extract<RealtimeEvent, { type: 'message.delta_applied' }>).revision);
+  });
+
   it('maps an agent lifecycle event into presence update when a phase exists', () => {
     vi.spyOn(Date, 'now').mockReturnValue(30);
 

@@ -613,7 +613,7 @@ describe('buildRealtimeSnapshot', () => {
     expect(new Set(snapshot.runs[0]!.messageIds).size).toBe(snapshot.runs[0]!.messageIds.length);
   });
 
-  it('strips user transport decorations that loadHistory already cleans', async () => {
+  it('strips user transport decorations and ignores invalid upload manifests', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(15_000);
 
     gatewayRpcCallMock.mockImplementation(async (method: string) => {
@@ -653,6 +653,50 @@ describe('buildRealtimeSnapshot', () => {
         contentParts: [{ type: 'text', text: 'Hello from voice' }],
       }),
     ]);
+    expect(snapshot.messages[0]).not.toHaveProperty('uploadAttachments');
+  });
+
+  it('drops malformed upload manifests without leaking raw manifest text', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(15_250);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'idle',
+              updatedAt: 15_200,
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return {
+          messages: [
+            {
+              role: 'user',
+              createdAt: 15_150,
+              content: 'Please use this file.\n\n<nerve-upload-manifest>{"version":1,"attachments":[</nerve-upload-manifest>',
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        contentParts: [{ type: 'text', text: 'Please use this file.' }],
+      }),
+    ]);
+    expect(snapshot.messages[0]).not.toHaveProperty('uploadAttachments');
   });
 
   it('preserves manifest-only user messages as attachment-only realtime entities', async () => {

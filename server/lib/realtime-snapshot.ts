@@ -1,4 +1,5 @@
 import { gatewayRpcCall } from './gateway-rpc.js';
+import { z } from 'zod';
 
 const SESSIONS_ACTIVE_MINUTES = 24 * 60;
 const SESSIONS_LIMIT = 200;
@@ -173,6 +174,25 @@ interface RunAccumulator {
   lastEventAt: number;
 }
 
+const uploadAttachmentSchema = z.object({
+  id: z.string(),
+  origin: z.enum(['upload', 'server_path']),
+  mode: z.enum(['inline', 'file_reference']),
+  name: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  inline: z.record(z.string(), z.unknown()).optional(),
+  reference: z.record(z.string(), z.unknown()).optional(),
+  preparation: z.record(z.string(), z.unknown()).optional(),
+  policy: z.object({
+    forwardToSubagents: z.boolean(),
+  }),
+}).passthrough();
+
+const uploadManifestSchema = z.object({
+  attachments: z.array(uploadAttachmentSchema).min(1),
+}).passthrough();
+
 function trimToNull(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -271,16 +291,16 @@ function extractUploadAttachments(rawText: string): {
   const cleanedText = rawText.replace(UPLOAD_MANIFEST_RE, '').trimEnd();
 
   try {
-    const parsed = JSON.parse(match[1]) as { attachments?: UploadAttachmentDescriptor[] };
-    if (!Array.isArray(parsed.attachments) || parsed.attachments.length === 0) {
+    const parsed = uploadManifestSchema.safeParse(JSON.parse(match[1]));
+    if (!parsed.success) {
       return { cleanedText };
     }
     return {
       cleanedText,
-      uploadAttachments: parsed.attachments,
+      uploadAttachments: parsed.data.attachments,
     };
   } catch {
-    return { cleanedText: rawText };
+    return { cleanedText };
   }
 }
 

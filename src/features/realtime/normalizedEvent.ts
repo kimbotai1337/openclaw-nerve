@@ -14,6 +14,20 @@ function nowFromGatewayEvent(): number {
   return Date.now();
 }
 
+let lastFallbackRevisionBase = -1;
+let fallbackRevisionOffset = 0;
+
+function nextFallbackRevisionOffset(receivedAt: number): number {
+  if (receivedAt !== lastFallbackRevisionBase) {
+    lastFallbackRevisionBase = receivedAt;
+    fallbackRevisionOffset = 0;
+    return fallbackRevisionOffset;
+  }
+
+  fallbackRevisionOffset += 1;
+  return fallbackRevisionOffset;
+}
+
 function parseTimestamp(value: string | number | undefined): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string' || value.trim().length === 0) return null;
@@ -35,11 +49,29 @@ function trimToNull(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveMessageRevision(
+function resolveEventOrdering(
   event: NonNullable<ReturnType<typeof classifyStreamEvent>>,
   receivedAt: number,
-): number {
-  return event.chatSeq ?? event.frameSeq ?? receivedAt;
+): { revision: number; fallbackKey: string | null } {
+  if (typeof event.chatSeq === 'number' && Number.isFinite(event.chatSeq)) {
+    return { revision: event.chatSeq, fallbackKey: null };
+  }
+
+  if (typeof event.frameSeq === 'number' && Number.isFinite(event.frameSeq)) {
+    return { revision: event.frameSeq, fallbackKey: null };
+  }
+
+  const offset = nextFallbackRevisionOffset(receivedAt);
+  return {
+    revision: receivedAt * 1000 + offset,
+    fallbackKey: `fallback-${receivedAt}-${offset}`,
+  };
+}
+
+function buildChatEventId(receivedAt: number, runId: string, suffix: string, fallbackKey: string | null): string {
+  return fallbackKey
+    ? `chat:${receivedAt}:${runId}:${suffix}:${fallbackKey}`
+    : `chat:${receivedAt}:${runId}:${suffix}`;
 }
 
 function toCommittedMessage(
@@ -113,10 +145,11 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
   }
 
   if (classified.type === 'chat_started' && classified.runId) {
+    const ordering = resolveEventOrdering(classified, receivedAt);
     return [
       {
         type: 'run.status_changed',
-        eventId: `chat:${receivedAt}:${classified.runId}:started`,
+        eventId: buildChatEventId(receivedAt, classified.runId, 'started', ordering.fallbackKey),
         receivedAt,
         source: 'live-chat',
         sessionId,
@@ -129,11 +162,11 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
 
   if (classified.type === 'chat_delta' && classified.runId && classified.chatPayload) {
     const delta = extractStreamDelta(classified.chatPayload);
-    const revision = resolveMessageRevision(classified, receivedAt);
+    const ordering = resolveEventOrdering(classified, receivedAt);
     const events: RealtimeEvent[] = [
       {
         type: 'run.status_changed',
-        eventId: `chat:${receivedAt}:${classified.runId}:delta`,
+        eventId: buildChatEventId(receivedAt, classified.runId, 'delta', ordering.fallbackKey),
         receivedAt,
         source: 'live-chat',
         sessionId,
@@ -146,14 +179,14 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
     if (delta) {
       events.push({
         type: 'message.delta_applied',
-        eventId: `chat:${receivedAt}:${classified.runId}:message`,
+        eventId: buildChatEventId(receivedAt, classified.runId, 'message', ordering.fallbackKey),
         receivedAt,
         source: 'live-chat',
         sessionId,
         runId: classified.runId,
         messageId: `${classified.runId}:assistant`,
         text: delta.cleaned,
-        revision,
+        revision: ordering.revision,
       });
     }
 
@@ -162,10 +195,10 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
 
   if (classified.type === 'chat_final' && classified.runId && classified.chatPayload) {
     const finalMessage = extractFinalMessage(classified.chatPayload);
-    const revision = resolveMessageRevision(classified, receivedAt);
+    const ordering = resolveEventOrdering(classified, receivedAt);
     const runStatusEvent: RealtimeEvent = {
       type: 'run.status_changed',
-      eventId: `chat:${receivedAt}:${classified.runId}:final`,
+      eventId: buildChatEventId(receivedAt, classified.runId, 'final', ordering.fallbackKey),
       receivedAt,
       source: 'live-chat',
       sessionId,
@@ -186,7 +219,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
       runStatusEvent,
       {
         type: 'message.committed',
-        eventId: `chat:${receivedAt}:${classified.runId}:committed`,
+        eventId: buildChatEventId(receivedAt, classified.runId, 'committed', ordering.fallbackKey),
         receivedAt,
         source: 'live-chat',
         sessionId,
@@ -196,7 +229,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
           `${classified.runId}:assistant`,
           finalMessage.text,
           finalMessage.charts,
-          revision,
+          ordering.revision,
           resolveCommittedCreatedAt(finalMessage.message, receivedAt),
         ),
       },
@@ -204,10 +237,11 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
   }
 
   if (classified.type === 'chat_error' && classified.runId) {
+    const ordering = resolveEventOrdering(classified, receivedAt);
     return [
       {
         type: 'run.status_changed',
-        eventId: `chat:${receivedAt}:${classified.runId}:error`,
+        eventId: buildChatEventId(receivedAt, classified.runId, 'error', ordering.fallbackKey),
         receivedAt,
         source: 'live-chat',
         sessionId,
@@ -219,10 +253,11 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
   }
 
   if (classified.type === 'chat_aborted' && classified.runId) {
+    const ordering = resolveEventOrdering(classified, receivedAt);
     return [
       {
         type: 'run.status_changed',
-        eventId: `chat:${receivedAt}:${classified.runId}:aborted`,
+        eventId: buildChatEventId(receivedAt, classified.runId, 'aborted', ordering.fallbackKey),
         receivedAt,
         source: 'live-chat',
         sessionId,

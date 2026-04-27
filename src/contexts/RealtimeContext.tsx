@@ -131,13 +131,21 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         durationMs: Date.now() - requestedAt,
       });
     } catch (error) {
+      const failedAt = Date.now();
       dispatch({
         type: 'connection.degraded',
-        eventId: buildLocalEventId('reconcile-failed', sessionId, Date.now()),
-        receivedAt: Date.now(),
+        eventId: buildLocalEventId('reconcile-failed', sessionId, failedAt),
+        receivedAt: failedAt,
         source: 'local',
         sessionId,
         reason: error instanceof Error ? error.message : 'snapshot-request-failed',
+      });
+      dispatch({
+        type: 'snapshot.merge_completed',
+        eventId: buildLocalEventId('reconcile-finished', sessionId, failedAt),
+        receivedAt: failedAt,
+        source: 'local',
+        sessionId,
       });
       console.debug('[realtime] snapshot failed', {
         sessionId,

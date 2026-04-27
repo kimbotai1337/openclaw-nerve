@@ -192,7 +192,7 @@ describe('RealtimeProvider', () => {
     expect(result.current.realtimeStatus).toBe('live');
   });
 
-  it('keeps reconcileNeeded set when snapshot reconcile fails', async () => {
+  it('ends syncing and reports degraded when snapshot reconcile fails', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: false,
       status: 503,
@@ -217,8 +217,9 @@ describe('RealtimeProvider', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/realtime/snapshot?sessionKey=agent%3Amain%3Amain');
     expect(thrown).toBeInstanceOf(Error);
-    expect(result.current.state.connection.reconcileNeeded).toBe(true);
-    expect(result.current.realtimeStatus).toBe('syncing');
+    expect(result.current.state.connection.status).toBe('degraded');
+    expect(result.current.state.connection.reconcileNeeded).toBe(false);
+    expect(result.current.realtimeStatus).toBe('degraded');
   });
 
   it('keeps disconnected transport classified as offline', async () => {

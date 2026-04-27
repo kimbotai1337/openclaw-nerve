@@ -914,4 +914,36 @@ describe('ChatContext subscription stability', () => {
       expect(assistantCount).toBe(1);
     });
   });
+
+  it('keeps consumer-visible generating state true after send acknowledgement until realtime state catches up', async () => {
+    const { ChatProvider, useChat } = await setup();
+
+    let send: ((text: string, images?: ImageAttachment[]) => Promise<void>) | null = null;
+    let visibleIsGenerating = false;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        send = chat.handleSend;
+      }, [chat]);
+      useEffect(() => {
+        visibleIsGenerating = chat.isGenerating;
+      }, [chat.isGenerating]);
+      return null;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(send).not.toBeNull());
+
+    await act(async () => {
+      await send!('hello');
+    });
+
+    expect(visibleIsGenerating).toBe(true);
+  });
 });

@@ -281,7 +281,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const realtimeIsGenerating = currentSession
     ? selectSessionIsGenerating(realtimeState, currentSession)
     : false;
-  const visibleIsGenerating = isSendPending || realtimeIsGenerating;
+  const visibleIsGenerating = isGenerating || isSendPending || realtimeIsGenerating;
 
   useEffect(() => {
     isGeneratingRef.current = isGenerating || visibleIsGenerating;
