@@ -255,6 +255,55 @@ describe('ChatContext subscription stability', () => {
     });
   });
 
+  it('retries session-switch snapshot reconcile after a transient failure on the next reconnect', async () => {
+    const transientFailure = Promise.reject(new Error('transient snapshot failure'));
+    transientFailure.catch(() => {});
+
+    const { ChatProvider, gatewayState, requestSnapshotMock } = await setup();
+    gatewayState.connectionState = 'connected';
+    requestSnapshotMock
+      .mockImplementationOnce(() => transientFailure)
+      .mockResolvedValue(undefined);
+
+    function Consumer() {
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(requestSnapshotMock).toHaveBeenCalledWith('main', 'session-switch');
+    });
+    expect(requestSnapshotMock).toHaveBeenCalledTimes(1);
+
+    gatewayState.connectionState = 'reconnecting';
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    gatewayState.connectionState = 'connected';
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(requestSnapshotMock).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      requestSnapshotMock.mock.calls.filter(
+        ([sessionId, reason]) => sessionId === 'main' && reason === 'session-switch',
+      ),
+    ).toHaveLength(2);
+  });
+
   it('dispatches a local realtime run event after send acknowledgement', async () => {
     const { ChatProvider, useChat, dispatchMock } = await setup();
 
@@ -650,6 +699,115 @@ describe('ChatContext subscription stability', () => {
     await waitFor(() => {
       expect(messages).toHaveLength(1);
       expect(messages[0]?.rawText).toBe('Existing transcript');
+    });
+  });
+
+  it('does not reuse the same history msgId for repeated realtime assistant messages', async () => {
+    const historyMessages: ChatMsg[] = [
+      {
+        msgId: 'hist-1',
+        role: 'assistant',
+        html: 'OK',
+        rawText: 'OK',
+        timestamp: new Date(1_000),
+        collapsed: true,
+      },
+      {
+        msgId: 'hist-2',
+        role: 'assistant',
+        html: 'OK',
+        rawText: 'OK',
+        timestamp: new Date(2_000),
+        collapsed: false,
+      },
+    ];
+    const { ChatProvider, useChat, gatewayState, realtimeStateRef } = await setup({
+      currentSession: 'main',
+      realtimeState: {
+        connection: {
+          status: 'live',
+          lastLiveAt: 0,
+          lastDisconnectReason: null,
+          reconcileNeeded: false,
+          reconnectAttempt: 0,
+        },
+        sessions: { main: { sessionId: 'main', status: 'idle', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' } },
+        runs: {},
+        messages: {},
+        agentPresence: {},
+      },
+      loadChatHistoryImpl: async () => historyMessages,
+    });
+    gatewayState.connectionState = 'connected';
+
+    let messages: ChatMsg[] = [];
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+      }, [chat.messages]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages.map((message) => message.msgId)).toEqual(['hist-1', 'hist-2']);
+    });
+
+    realtimeStateRef.current = {
+      ...realtimeStateRef.current,
+      runs: {
+        'run-1': {
+          runId: 'run-1',
+          sessionId: 'main',
+          status: 'completed',
+          messageIds: ['rt-1', 'rt-2'],
+          lastEventAt: 3,
+          finalized: true,
+        },
+      },
+      messages: {
+        'rt-1': {
+          messageId: 'rt-1',
+          sessionId: 'main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'OK' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 1_000,
+        },
+        'rt-2': {
+          messageId: 'rt-2',
+          sessionId: 'main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'OK' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 2_000,
+        },
+      },
+    };
+
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      const assistantMessages = messages.filter((message) => message.role === 'assistant');
+      expect(assistantMessages).toHaveLength(2);
+      expect(assistantMessages.map((message) => message.msgId)).toEqual(['hist-1', 'hist-2']);
+      expect(assistantMessages.map((message) => message.collapsed)).toEqual([true, false]);
+      expect(new Set(assistantMessages.map((message) => message.msgId)).size).toBe(2);
     });
   });
 

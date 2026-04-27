@@ -114,25 +114,38 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
-function findHistoryMetadataSource(existingMessages: ChatMsg[], message: ChatMsg): ChatMsg | null {
+function findHistoryMetadataSource(
+  existingMessages: ChatMsg[],
+  message: ChatMsg,
+  claimedSourceIndices: Set<number>,
+): { index: number; message: ChatMsg } | null {
   const normalizedText = normalizeComparableText(message.rawText);
   const messageTimestamp = message.timestamp.getTime();
+  let bestMatch: { index: number; message: ChatMsg } | null = null;
+  let bestTimeDiff = Number.POSITIVE_INFINITY;
 
-  return existingMessages.find((candidate) =>
-    !candidate.pending
-    && !candidate.failed
-    && !candidate.toolGroup
-    && !candidate.intermediate
-    && !candidate.isThinking
-    && candidate.role === message.role
-    && normalizeComparableText(candidate.rawText) === normalizedText
-    && Math.abs(candidate.timestamp.getTime() - messageTimestamp) <= 60_000,
-  ) ?? null;
+  existingMessages.forEach((candidate, index) => {
+    if (claimedSourceIndices.has(index)) return;
+    if (candidate.pending || candidate.failed || candidate.toolGroup || candidate.intermediate || candidate.isThinking) {
+      return;
+    }
+    if (candidate.role !== message.role) return;
+    if (normalizeComparableText(candidate.rawText) !== normalizedText) return;
+
+    const timeDiff = Math.abs(candidate.timestamp.getTime() - messageTimestamp);
+    if (timeDiff > 60_000 || timeDiff > bestTimeDiff) return;
+
+    bestMatch = { index, message: candidate };
+    bestTimeDiff = timeDiff;
+  });
+
+  return bestMatch;
 }
 
 function mapRealtimeMessageToChatMsg(
   message: RealtimeMessageEntity,
   existingMessages: ChatMsg[],
+  claimedSourceIndices: Set<number>,
 ): ChatMsg {
   const rawText = message.contentParts.map((part) => part.text).join('');
   const baseMessage: ChatMsg = {
@@ -145,8 +158,11 @@ function mapRealtimeMessageToChatMsg(
     charts: message.charts,
     uploadAttachments: message.uploadAttachments,
   };
-  const metadataSource = findHistoryMetadataSource(existingMessages, baseMessage);
-  if (!metadataSource) return baseMessage;
+  const metadataMatch = findHistoryMetadataSource(existingMessages, baseMessage, claimedSourceIndices);
+  if (!metadataMatch) return baseMessage;
+
+  claimedSourceIndices.add(metadataMatch.index);
+  const metadataSource = metadataMatch.message;
 
   return {
     ...baseMessage,
@@ -256,6 +272,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleFinalTTS,
   } = ttsHook;
   const lastSessionSnapshotRequestRef = useRef<string | null>(null);
+  const inFlightSessionSnapshotRequestRef = useRef<string | null>(null);
   const previousSubagentPhaseRef = useRef<{ sessionId: string; phase: string | null } | null>(null);
   const realtimePresence = currentSession
     ? selectSessionAgentPresence(realtimeState, currentSession)
@@ -280,6 +297,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeRunIdRef.current = null;
     lastGatewaySeqRef.current = null;
     lastChatSeqRef.current = null;
+    lastSessionSnapshotRequestRef.current = null;
+    inFlightSessionSnapshotRequestRef.current = null;
     reconnectRecoveryOwnsHistoryRef.current = false;
     if (toolResultRefreshRef.current) {
       clearTimeout(toolResultRefreshRef.current);
@@ -337,9 +356,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (connectionState !== 'connected' || !currentSession) return;
     if (lastSessionSnapshotRequestRef.current === currentSession) return;
+    if (inFlightSessionSnapshotRequestRef.current === currentSession) return;
 
-    lastSessionSnapshotRequestRef.current = currentSession;
-    void requestSnapshot(currentSession, 'session-switch');
+    const requestedSession = currentSession;
+    inFlightSessionSnapshotRequestRef.current = requestedSession;
+    void requestSnapshot(requestedSession, 'session-switch')
+      .then(() => {
+        if (currentSessionRef.current === requestedSession) {
+          lastSessionSnapshotRequestRef.current = requestedSession;
+        }
+      })
+      .catch(() => {
+        if (lastSessionSnapshotRequestRef.current === requestedSession) {
+          lastSessionSnapshotRequestRef.current = null;
+        }
+      })
+      .finally(() => {
+        if (inFlightSessionSnapshotRequestRef.current === requestedSession) {
+          inFlightSessionSnapshotRequestRef.current = null;
+        }
+      });
   }, [connectionState, currentSession, requestSnapshot]);
 
   useEffect(() => {
@@ -349,8 +385,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (visibleRealtimeMessages.length === 0) return;
 
     const existingMessages = getAllMessages();
+    const claimedHistorySourceIndices = new Set<number>();
     const durableMessages = visibleRealtimeMessages.map((message) =>
-      mapRealtimeMessageToChatMsg(message, existingMessages),
+      mapRealtimeMessageToChatMsg(message, existingMessages, claimedHistorySourceIndices),
     );
     const overlayMessages = existingMessages.filter((message) =>
       shouldPreserveOverlayMessage(message, durableMessages),
