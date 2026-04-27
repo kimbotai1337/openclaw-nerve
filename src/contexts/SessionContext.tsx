@@ -7,7 +7,7 @@ import { getSessionKey, type Session, type AgentLogEntry, type EventEntry, type 
 import { playPing } from '@/features/voice/audio-feedback';
 import { describeToolUse } from '@/utils/helpers';
 import { buildSessionTree } from '@/features/sessions/sessionTree';
-import { isTerminalAgentPhase, selectSessionAgentPresence, selectSessionIsGenerating } from '@/features/realtime/selectors';
+import { isTerminalAgentPhase, selectSessionAgentPresence } from '@/features/realtime/selectors';
 import {
   buildAgentRootSessionKey,
   extractIdentityName,
@@ -25,9 +25,40 @@ import {
 const FULL_SESSIONS_LIMIT = 1000;
 const MAIN_SESSION_KEY = 'agent:main:main';
 const SESSIONS_SPAWNED_LIMIT = 500;
+const ACTIVE_RUN_STATUSES = new Set(['queued', 'running']);
+const FAILED_RUN_STATUSES = new Set(['failed', 'interrupted']);
 
 function normalizePresencePhase(phase: string | null | undefined): string | null {
   return typeof phase === 'string' ? phase.trim().toLowerCase() : null;
+}
+
+function getLatestRunForSession(
+  runs: Record<string, { runId: string; sessionId: string; lastEventAt: number; finalized: boolean; status: string }>,
+  sessionKey: string,
+) {
+  let latestRun: (typeof runs)[string] | null = null;
+
+  for (const run of Object.values(runs)) {
+    if (run.sessionId !== sessionKey) continue;
+    if (!latestRun || run.lastEventAt > latestRun.lastEventAt) {
+      latestRun = run;
+    }
+  }
+
+  return latestRun;
+}
+
+function hasStreamingMessageForRun(
+  messages: Record<string, { status: string }>,
+  messageIds: string[],
+) {
+  return messageIds.some((messageId) => messages[messageId]?.status === 'streaming');
+}
+
+function getTerminalRunSignature(run: { runId: string; status: string; finalized: boolean; lastEventAt: number } | null) {
+  if (!run || !run.finalized) return null;
+  if (run.status !== 'completed' && !FAILED_RUN_STATUSES.has(run.status)) return null;
+  return `${run.runId}:${run.status}:${run.lastEventAt}`;
 }
 
 export type SubagentCleanupMode = 'keep' | 'delete';
@@ -86,8 +117,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const toolSeenRef = useRef<Map<string, number>>(new Map());
   const doneTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const delayedRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const missingSessionRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentStatusRef = useRef(agentStatus);
   const processedPresenceRef = useRef<Record<string, { phase: string | null; lastSeenAt: number }>>({});
+  const processedTerminalRunRef = useRef<Record<string, string>>({});
 
   // Derive busyState from agentStatus for backward compatibility
   const busyState = useMemo(() => {
@@ -638,7 +671,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     refreshSessionsRef.current = refreshSessions;
   }, [refreshSessions]);
 
-  // Update session in list from WebSocket event data
+  // Update a session row locally for explicit UI actions.
   const updateSessionFromEvent = useCallback((sessionKey: string, updates: Partial<Session>) => {
     setSessions(prev => {
       const idx = prev.findIndex(s => getSessionKey(s) === sessionKey);
@@ -668,15 +701,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Extract session updates (state + token data) from a typed agent event payload
-  const extractSessionUpdates = useCallback((state: string | undefined, payload: AgentEventPayload | ChatEventPayload): Partial<Session> => {
-    const updates: Partial<Session> = {};
-    if (state) updates.state = state;
-    if ('totalTokens' in payload && typeof payload.totalTokens === 'number') updates.totalTokens = payload.totalTokens;
-    if ('contextTokens' in payload && typeof payload.contextTokens === 'number') updates.contextTokens = payload.contextTokens;
-    return updates;
-  }, []);
-
   const scheduleDelayedRefresh = useCallback(() => {
     if (delayedRefreshTimeoutRef.current) {
       clearTimeout(delayedRefreshTimeoutRef.current);
@@ -687,8 +711,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, 1500);
   }, []);
 
+  const scheduleMissingSessionRefresh = useCallback(() => {
+    if (missingSessionRefreshTimeoutRef.current) return;
+    missingSessionRefreshTimeoutRef.current = setTimeout(() => {
+      missingSessionRefreshTimeoutRef.current = null;
+      void refreshSessionsRef.current();
+    }, 100);
+  }, []);
+
   useEffect(() => {
     const nextProcessedPresence: Record<string, { phase: string | null; lastSeenAt: number }> = {};
+    const nextProcessedTerminalRuns = { ...processedTerminalRunRef.current };
 
     for (const session of sessionsRef.current) {
       const sessionKey = getSessionKey(session);
@@ -697,6 +730,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const presence = selectSessionAgentPresence(realtimeState, sessionKey);
       const phase = normalizePresencePhase(presence?.phase);
       const lastSeenAt = presence?.lastSeenAt ?? 0;
+      const latestRun = getLatestRunForSession(realtimeState.runs, sessionKey);
+      const terminalRunSignature = getTerminalRunSignature(latestRun);
       const existing = agentStatusRef.current[sessionKey];
       const previousPresence = processedPresenceRef.current[sessionKey];
 
@@ -710,6 +745,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (previousPresence?.phase !== phase || previousPresence.lastSeenAt !== lastSeenAt) {
           setGranularStatus(sessionKey, { status: 'ERROR', since: lastSeenAt || Date.now() });
         }
+        if (terminalRunSignature) nextProcessedTerminalRuns[sessionKey] = terminalRunSignature;
         nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
         continue;
       }
@@ -718,6 +754,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (previousPresence?.phase !== phase || previousPresence.lastSeenAt !== lastSeenAt) {
           setGranularStatus(sessionKey, { status: 'DONE', since: lastSeenAt || Date.now() });
         }
+        if (terminalRunSignature) nextProcessedTerminalRuns[sessionKey] = terminalRunSignature;
         nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
         continue;
       }
@@ -733,13 +770,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         continue;
       }
 
-      if (selectSessionIsGenerating(realtimeState, sessionKey)) {
+      if (latestRun && !latestRun.finalized && ACTIVE_RUN_STATUSES.has(latestRun.status)) {
+        const status = hasStreamingMessageForRun(realtimeState.messages, latestRun.messageIds)
+          ? 'STREAMING'
+          : 'THINKING';
         setGranularStatus(sessionKey, {
-          status: existing?.status === 'STREAMING' ? 'STREAMING' : 'THINKING',
-          toolName: existing?.status === 'THINKING' ? existing.toolName : undefined,
-          toolDescription: existing?.status === 'THINKING' ? existing.toolDescription : undefined,
-          since: existing?.since ?? Date.now(),
+          status,
+          toolName: status === 'THINKING' && existing?.status === 'THINKING' ? existing.toolName : undefined,
+          toolDescription: status === 'THINKING' && existing?.status === 'THINKING' ? existing.toolDescription : undefined,
+          since: latestRun.lastEventAt || Date.now(),
         });
+        nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
+        continue;
+      }
+
+      if (terminalRunSignature) {
+        if (processedTerminalRunRef.current[sessionKey] !== terminalRunSignature) {
+          setGranularStatus(sessionKey, {
+            status: latestRun?.status === 'completed' ? 'DONE' : 'ERROR',
+            since: latestRun?.lastEventAt || Date.now(),
+          });
+        }
+        nextProcessedTerminalRuns[sessionKey] = terminalRunSignature;
         nextProcessedPresence[sessionKey] = { phase, lastSeenAt };
         continue;
       }
@@ -758,9 +810,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
 
     processedPresenceRef.current = nextProcessedPresence;
+    processedTerminalRunRef.current = nextProcessedTerminalRuns;
   }, [displaySessions, realtimeState, setGranularStatus]);
 
-  // Subscribe to gateway events for granular status tracking + session state sync + agent log + event log
+  // Subscribe to gateway events for refresh cues, unread markers, agent log, and event log.
   useEffect(() => {
     const unsub = subscribe((msg: GatewayEvent) => {
       const evt = msg.event;
@@ -768,9 +821,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       addEvent(msg);
 
-      // Session granular status tracking + state sync from agent/chat events
+      // Handle agent/chat refresh cues and unread markers.
       if ((evt === 'agent' || evt === 'chat') && p.sessionKey) {
         const sk = p.sessionKey;
+        if (!sessionsRef.current.some((session) => getSessionKey(session) === sk)) {
+          scheduleMissingSessionRefresh();
+        }
         const typedPayload = evt === 'agent'
           ? (msg.payload || {}) as AgentEventPayload
           : (msg.payload || {}) as ChatEventPayload;
@@ -794,18 +850,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 pingSession(sk);
               }
               refreshSessions();
-            }
-          } else if (ap.stream === 'tool' && ap.data) {
-            if (ap.data.phase === 'start' && ap.data.name) {
-              const toolDesc = describeToolUse(ap.data.name, ap.data.args || {});
-              setGranularStatus(sk, {
-                status: 'THINKING',
-                toolName: ap.data.name,
-                toolDescription: toolDesc || undefined,
-                since: Date.now(),
-              });
-            } else if (ap.data.phase === 'result') {
-              setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             }
           }
         }
@@ -834,15 +878,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }
           }
         }
-
-        const state = evt === 'agent'
-          ? ((typedPayload as AgentEventPayload).state || (typedPayload as AgentEventPayload).agentState || '')
-          : ((typedPayload as ChatEventPayload).state || '');
-
-        const updates = extractSessionUpdates(state || undefined, typedPayload);
-        if (Object.keys(updates).length > 0) {
-          updateSessionFromEvent(sk, updates);
-        }
       }
 
       feedAgentLog(evt, p);
@@ -851,7 +886,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       unsub();
     };
-  }, [subscribe, addEvent, setGranularStatus, markSessionUnread, pingSession, feedAgentLog, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
+  }, [subscribe, addEvent, markSessionUnread, pingSession, feedAgentLog, refreshSessions, scheduleDelayedRefresh, scheduleMissingSessionRefresh]);
 
   useEffect(() => {
     return () => {
@@ -862,6 +897,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (delayedRefreshTimeoutRef.current) {
         clearTimeout(delayedRefreshTimeoutRef.current);
         delayedRefreshTimeoutRef.current = null;
+      }
+      if (missingSessionRefreshTimeoutRef.current) {
+        clearTimeout(missingSessionRefreshTimeoutRef.current);
+        missingSessionRefreshTimeoutRef.current = null;
       }
     };
   }, []);

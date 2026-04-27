@@ -25,16 +25,22 @@ describe('StatusBar realtime status', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('renders SYNCING when reconcile is in progress', () => {
+  it.each([
+    ['live', 'LIVE'],
+    ['reconnecting', 'RECONNECTING'],
+    ['syncing', 'SYNCING'],
+    ['degraded', 'DEGRADED'],
+    ['offline', 'OFFLINE'],
+  ] as const)('renders %s as %s', (realtimeStatus, label) => {
     render(
       <StatusBar
         connectionState="connected"
-        realtimeStatus="syncing"
+        realtimeStatus={realtimeStatus}
         sessionCount={2}
         sparkline="▁▂▃▄"
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('SYNCING');
+    expect(screen.getByRole('status')).toHaveTextContent(label);
   });
 });

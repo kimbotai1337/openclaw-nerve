@@ -67,6 +67,10 @@ function toCommittedMessage(
 function deriveAgentPhase(event: ReturnType<typeof classifyStreamEvent>): string | null {
   if (!event || event.source !== 'agent') return null;
 
+  if (event.type === 'assistant_stream') {
+    return 'streaming';
+  }
+
   const agentState = trimToNull(event.agentPayload?.state) ?? trimToNull(event.agentPayload?.agentState);
   if (agentState) return agentState;
 

@@ -113,7 +113,7 @@ describe('normalized realtime events', () => {
     ]);
   });
 
-  it('does not emit presence updates for phase-less agent frames', () => {
+  it('maps phase-less assistant agent frames into streaming presence', () => {
     vi.spyOn(Date, 'now').mockReturnValue(44);
 
     const event: GatewayEvent = {
@@ -127,7 +127,21 @@ describe('normalized realtime events', () => {
       },
     };
 
-    expect(normalizeGatewayEvent(event)).toEqual([]);
+    expect(normalizeGatewayEvent(event)).toEqual([
+      {
+        type: 'agent.presence_updated',
+        eventId: 'agent:44:agent:main:main',
+        receivedAt: 44,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'streaming',
+          lastSeenAt: 44,
+        },
+      },
+    ]);
   });
 
   it('does not emit presence updates for whitespace-only agent state values', () => {

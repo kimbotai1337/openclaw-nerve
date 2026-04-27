@@ -20,6 +20,7 @@ function createDeferred<T>() {
 
 const {
   settingsContext,
+  appRealtimeContext,
   uploadConfigState,
   sessionContext,
   saveFileByAgent,
@@ -28,6 +29,7 @@ const {
   dirtyStateByAgent,
   reloadCalls,
   topBarRenderSnapshots,
+  statusBarRenderSnapshots,
   tabRenderSnapshots,
   addWorkspacePathSpy,
   useOpenFilesMock,
@@ -35,6 +37,9 @@ const {
   const settingsContext = {
     kanbanVisible: true,
     commandPaletteButtonVisible: true,
+  };
+  const appRealtimeContext = {
+    realtimeStatus: 'live' as 'live' | 'reconnecting' | 'syncing' | 'degraded' | 'offline',
   };
   const uploadConfigState = {
     fileReferenceEnabled: true,
@@ -80,6 +85,7 @@ const {
   };
   const reloadCalls: Array<{ agentId: string; path: string }> = [];
   const topBarRenderSnapshots: Array<{ showKanbanView?: boolean; viewMode?: string }> = [];
+  const statusBarRenderSnapshots: Array<{ realtimeStatus?: string }> = [];
   const tabRenderSnapshots: Array<{
     workspaceAgentId: string;
     hasSaveToast: boolean;
@@ -109,6 +115,7 @@ const {
 
   return {
     settingsContext,
+    appRealtimeContext,
     uploadConfigState,
     sessionContext,
     saveFileByAgent,
@@ -117,6 +124,7 @@ const {
     dirtyStateByAgent,
     reloadCalls,
     topBarRenderSnapshots,
+    statusBarRenderSnapshots,
     tabRenderSnapshots,
     addWorkspacePathSpy,
     useOpenFilesMock,
@@ -284,7 +292,7 @@ vi.mock('@/features/connect/ConnectDialog', () => ({
 
 vi.mock('@/contexts/RealtimeContext', () => ({
   useRealtime: () => ({
-    realtimeStatus: 'live',
+    realtimeStatus: appRealtimeContext.realtimeStatus,
   }),
 }));
 
@@ -307,7 +315,10 @@ vi.mock('@/components/TopBar', () => ({
 }));
 
 vi.mock('@/components/StatusBar', () => ({
-  StatusBar: () => null,
+  StatusBar: (props: { realtimeStatus?: string }) => {
+    statusBarRenderSnapshots.push({ realtimeStatus: props.realtimeStatus });
+    return null;
+  },
 }));
 
 vi.mock('@/components/ConfirmDialog', () => ({
@@ -463,8 +474,10 @@ describe('App save toast workspace scoping', () => {
     dirtyStateByAgent.alpha = false;
     dirtyStateByAgent.bravo = false;
     settingsContext.kanbanVisible = true;
+    appRealtimeContext.realtimeStatus = 'live';
     reloadCalls.length = 0;
     topBarRenderSnapshots.length = 0;
+    statusBarRenderSnapshots.length = 0;
     tabRenderSnapshots.length = 0;
     useOpenFilesMock.mockClear();
 
@@ -651,6 +664,22 @@ describe('App save toast workspace scoping', () => {
     expect(screen.getByTestId('workspace-agent')).toHaveTextContent('alpha');
     expect(screen.queryByText('File changed externally.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+  });
+});
+
+describe('App status bar wiring', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    appRealtimeContext.realtimeStatus = 'live';
+    statusBarRenderSnapshots.length = 0;
+  });
+
+  it('passes realtimeStatus through to StatusBar', () => {
+    appRealtimeContext.realtimeStatus = 'syncing';
+
+    render(<App />);
+
+    expect(statusBarRenderSnapshots.at(-1)).toMatchObject({ realtimeStatus: 'syncing' });
   });
 });
 

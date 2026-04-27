@@ -243,6 +243,239 @@ describe('SessionContext', () => {
     });
   });
 
+  it('does not derive reviewer status from raw tool websocket events without realtime presence', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(subscribedHandler).not.toBeNull();
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'read',
+            args: { path: 'src/types.ts' },
+          },
+        },
+      });
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('NONE');
+  });
+
+  it('derives standard chat streaming and done states from realtime runs and messages', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const view = render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('NONE');
+    });
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      runs: {
+        'run-reviewer': {
+          runId: 'run-reviewer',
+          sessionId: 'agent:reviewer:main',
+          status: 'running',
+          messageIds: ['run-reviewer:assistant'],
+          lastEventAt: Date.now(),
+          finalized: false,
+        },
+      },
+      messages: {
+        'run-reviewer:assistant': {
+          messageId: 'run-reviewer:assistant',
+          sessionId: 'agent:reviewer:main',
+          runId: 'run-reviewer',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'partial' }],
+          status: 'streaming',
+          revision: 1,
+          createdAt: Date.now(),
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('STREAMING');
+
+    vi.useFakeTimers();
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      runs: {
+        'run-reviewer': {
+          runId: 'run-reviewer',
+          sessionId: 'agent:reviewer:main',
+          status: 'completed',
+          messageIds: ['run-reviewer:assistant'],
+          lastEventAt: Date.now(),
+          finalized: true,
+        },
+      },
+      messages: {
+        'run-reviewer:assistant': {
+          messageId: 'run-reviewer:assistant',
+          sessionId: 'agent:reviewer:main',
+          runId: 'run-reviewer',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'final' }],
+          status: 'committed',
+          revision: 2,
+          createdAt: Date.now(),
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      sessions: {
+        'agent:reviewer:main': {
+          sessionId: 'agent:reviewer:main',
+          status: 'idle',
+          agentId: 'reviewer',
+          updatedAt: Date.now(),
+          sourceVersion: 'snapshot-2',
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+  });
+
+  it('derives finalized chat failures as error from realtime runs', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const view = render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('NONE');
+    });
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      runs: {
+        'run-reviewer': {
+          runId: 'run-reviewer',
+          sessionId: 'agent:reviewer:main',
+          status: 'failed',
+          messageIds: ['run-reviewer:assistant'],
+          lastEventAt: Date.now(),
+          finalized: true,
+        },
+      },
+      messages: {
+        'run-reviewer:assistant': {
+          messageId: 'run-reviewer:assistant',
+          sessionId: 'agent:reviewer:main',
+          runId: 'run-reviewer',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'partial' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: Date.now(),
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('ERROR');
+  });
+
   it('subagent spawn calls /api/sessions/spawn-subagent, refreshes sessions, and switches to the returned child', async () => {
     let sessionsListCalls = 0;
     rpcMock.mockImplementation(async (method: string) => {
