@@ -30,6 +30,7 @@ const PROJECT_ROOT = process.env.NERVE_PROJECT_ROOT || path.resolve(__dirname, '
 const IDENTITY_FILE = 'identity.json';
 const INSTALL_METHOD_FILE = 'install-method.json';
 const BOOTSTRAP_FILE = 'bootstrap.json';
+let cachedInstanceId: string | undefined;
 
 function telemetryDir(): string {
   return process.env.NERVE_TELEMETRY_DIR || path.join(PROJECT_ROOT, '.nerve', 'telemetry');
@@ -117,10 +118,20 @@ export function writeIdentity(instanceId: string, createdAt = new Date().toISOSt
 }
 
 export function ensureInstanceId(createdAt = new Date().toISOString()): string {
+  if (cachedInstanceId) {
+    return cachedInstanceId;
+  }
+
   const current = readIdentity();
-  if (current?.instanceId) return current.instanceId;
+  if (current?.instanceId) {
+    cachedInstanceId = current.instanceId;
+    return current.instanceId;
+  }
 
   const instanceId = crypto.randomUUID();
+  // Keep a process-lifetime fallback when the filesystem is read-only or broken,
+  // so one bad write does not rotate the anonymous id on every call.
+  cachedInstanceId = instanceId;
   writeIdentity(instanceId, createdAt);
   return instanceId;
 }

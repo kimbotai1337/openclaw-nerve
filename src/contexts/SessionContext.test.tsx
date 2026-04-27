@@ -10,6 +10,7 @@ const playPingMock = vi.fn();
 const telemetryClientMocks = vi.hoisted(() => ({
   emitSessionOpened: vi.fn(async () => undefined),
   emitBranchCreated: vi.fn(async () => undefined),
+  emitBranchSwitched: vi.fn(async () => undefined),
 }));
 let rpcMock: ReturnType<typeof vi.fn>;
 let subscribeMock: ReturnType<typeof vi.fn>;
@@ -42,6 +43,7 @@ vi.mock('@/features/voice/audio-feedback', () => ({
 vi.mock('@/features/telemetry/telemetryClient', () => ({
   emitSessionOpened: (...args: unknown[]) => telemetryClientMocks.emitSessionOpened(...args),
   emitBranchCreated: (...args: unknown[]) => telemetryClientMocks.emitBranchCreated(...args),
+  emitBranchSwitched: (...args: unknown[]) => telemetryClientMocks.emitBranchSwitched(...args),
 }));
 
 function jsonResponse(data: unknown): Response {
@@ -114,6 +116,19 @@ function SessionStatusProbe() {
   return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
 }
 
+function SessionDeleteProbe() {
+  const { currentSession, deleteSession } = useSessionContext();
+
+  return (
+    <div>
+      <div data-testid="current-session">{currentSession}</div>
+      <button data-testid="delete-main" onClick={() => void deleteSession('agent:main:main')}>
+        Delete main
+      </button>
+    </div>
+  );
+}
+
 function SessionTelemetryProbe() {
   const { telemetry } = useSessionContext();
 
@@ -139,6 +154,7 @@ describe('SessionContext', () => {
     connectionStateValue = 'connected';
     telemetryClientMocks.emitSessionOpened.mockReset();
     telemetryClientMocks.emitBranchCreated.mockReset();
+    telemetryClientMocks.emitBranchSwitched.mockReset();
     serverInfoResponse = {
       agentName: 'Jen',
       telemetry: {
@@ -332,6 +348,26 @@ describe('SessionContext', () => {
     await waitFor(() => {
       expect(telemetryClientMocks.emitBranchCreated).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('emits branch_switched when deleting the active root falls back to a different root', async () => {
+    render(<SessionProvider><SessionDeleteProbe /></SessionProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:main:main');
+    });
+    telemetryClientMocks.emitBranchSwitched.mockClear();
+
+    await act(async () => {
+      screen.getByTestId('delete-main').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:designer:main');
+    });
+
+    expect(telemetryClientMocks.emitBranchSwitched).toHaveBeenCalledTimes(1);
+    expect(telemetryClientMocks.emitBranchSwitched).toHaveBeenCalledWith({ success: true });
   });
 
   it('subagent spawn calls /api/sessions/spawn-subagent, refreshes sessions, and switches to the returned child', async () => {

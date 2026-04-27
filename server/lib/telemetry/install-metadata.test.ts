@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let ensureInstanceId: typeof import('./install-metadata.js').ensureInstanceId;
 let ensureLegacyUpgradeMarker: typeof import('./install-metadata.js').ensureLegacyUpgradeMarker;
 let readBootstrapMarker: typeof import('./install-metadata.js').readBootstrapMarker;
+let readIdentity: typeof import('./install-metadata.js').readIdentity;
 let readInstallMethod: typeof import('./install-metadata.js').readInstallMethod;
 let readInstallMethodOrUnknown: typeof import('./install-metadata.js').readInstallMethodOrUnknown;
 let resolveTelemetryMode: typeof import('./install-metadata.js').resolveTelemetryMode;
@@ -32,6 +33,7 @@ describe('telemetry install metadata', () => {
     ensureInstanceId = mod.ensureInstanceId;
     ensureLegacyUpgradeMarker = mod.ensureLegacyUpgradeMarker;
     readBootstrapMarker = mod.readBootstrapMarker;
+    readIdentity = mod.readIdentity;
     readInstallMethod = mod.readInstallMethod;
     readInstallMethodOrUnknown = mod.readInstallMethodOrUnknown;
     resolveTelemetryMode = mod.resolveTelemetryMode;
@@ -109,6 +111,23 @@ describe('telemetry install metadata', () => {
 
     const stored = JSON.parse(fs.readFileSync(path.join(tempDir, 'identity.json'), 'utf8'));
     expect(stored.instanceId).toBe(first);
+  });
+
+  it('keeps the instance id stable within the process when identity writes fail', () => {
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const first = ensureInstanceId('2026-04-21T00:00:00Z');
+    const second = ensureInstanceId('2026-04-22T00:00:00Z');
+
+    expect(first).toBe(second);
+    expect(readIdentity()).toBeUndefined();
+    expect(warnSpy.mock.calls.map(call => call.join(' ')).join('\n')).toContain('Failed to write identity.json');
+
+    writeSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('writes and reads install method stamps', () => {

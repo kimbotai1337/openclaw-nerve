@@ -1257,6 +1257,127 @@ describe('ws-proxy', () => {
       ws.close();
     });
 
+    it('flushes run-scoped pending tools when a failure frame omits runId but keeps the sessionKey', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:main:main',
+          runId: 'run-tool-failure-missing-run-id-1',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'custom_tool',
+            toolCallId: 'tool-failure-missing-run-id-1',
+          },
+        },
+      }));
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:main:main',
+          state: 'error',
+          error: 'tool run exploded without run id',
+        },
+      }));
+
+      await vi.waitFor(() => {
+        expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledTimes(1);
+      });
+
+      expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: 'custom_tool',
+        success: false,
+        surface: 'chat',
+      }));
+
+      ws.close();
+    });
+
+    it('tracks duplicate toolCallIds independently when their runIds differ', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:alpha:main',
+          runId: 'run-tool-dup-1',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'read',
+            toolCallId: 'tool-duplicate-id',
+          },
+        },
+      }));
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          runId: 'run-tool-dup-2',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            name: 'write',
+            toolCallId: 'tool-duplicate-id',
+          },
+        },
+      }));
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:alpha:main',
+          runId: 'run-tool-dup-1',
+          stream: 'tool',
+          data: {
+            phase: 'result',
+            toolCallId: 'tool-duplicate-id',
+          },
+        },
+      }));
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          runId: 'run-tool-dup-2',
+          stream: 'tool',
+          data: {
+            phase: 'result',
+            toolCallId: 'tool-duplicate-id',
+          },
+        },
+      }));
+
+      await vi.waitFor(() => {
+        expect(telemetryRuntimeMock.recordToolCompleted).toHaveBeenCalledTimes(2);
+      });
+
+      expect(telemetryRuntimeMock.recordToolCompleted.mock.calls.map(([input]) => (
+        (input as { toolName: string }).toolName
+      ))).toEqual(['read', 'write']);
+
+      ws.close();
+    });
+
     it('emits failed tool_call_completed when CLI lifecycle ends before a pending tool returns', async () => {
       const ws = new WebSocket(
         `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,

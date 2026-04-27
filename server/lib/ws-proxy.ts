@@ -53,6 +53,8 @@ interface PendingRequest {
 
 interface PendingTool {
   runId?: string;
+  sessionKey?: string;
+  toolCallId: string;
   toolName: string;
   startedAt: number;
 }
@@ -331,21 +333,66 @@ function createGatewayRelay(
     }));
   }
 
+  function getPendingToolKey(runId: string | undefined, toolCallId: string): string {
+    return `${runId ?? ''}\u0000${toolCallId}`;
+  }
+
+  function resolvePendingToolKey(options: {
+    runId?: string;
+    sessionKey?: string;
+    toolCallId: string;
+  }): string | undefined {
+    if (options.runId) {
+      const directKey = getPendingToolKey(options.runId, options.toolCallId);
+      if (pendingTools.has(directKey)) {
+        return directKey;
+      }
+    }
+
+    const matches = [...pendingTools.entries()].filter(([, entry]) => (
+      entry.toolCallId === options.toolCallId
+      && (!options.sessionKey || entry.sessionKey === options.sessionKey)
+    ));
+
+    if (matches.length === 0) {
+      return undefined;
+    }
+
+    const runlessMatch = matches.find(([, entry]) => entry.runId === undefined);
+    if (runlessMatch) {
+      return runlessMatch[0];
+    }
+
+    if (matches.length === 1) {
+      return matches[0]?.[0];
+    }
+
+    return undefined;
+  }
+
   function flushPendingTools(
     success: boolean,
     predicate: (entry: PendingTool) => boolean = () => true,
   ): void {
-    for (const [toolCallId, entry] of pendingTools.entries()) {
+    for (const [pendingToolKey, entry] of pendingTools.entries()) {
       if (!predicate(entry)) continue;
-      pendingTools.delete(toolCallId);
+      pendingTools.delete(pendingToolKey);
       recordToolCompleted(entry, success);
     }
   }
 
-  function flushPendingToolsForRun(runId: string | undefined, success: boolean): void {
-    flushPendingTools(success, (entry) => (
-      runId ? entry.runId === runId : entry.runId === undefined
-    ));
+  function flushPendingToolsForFailure(runId: string | undefined, sessionKey: string | undefined): void {
+    if (runId) {
+      flushPendingTools(false, (entry) => entry.runId === runId);
+      return;
+    }
+
+    if (sessionKey) {
+      flushPendingTools(false, (entry) => entry.sessionKey === sessionKey);
+      return;
+    }
+
+    flushAllPendingTools(false);
   }
 
   function flushAllPendingTools(success: boolean): void {
@@ -375,10 +422,13 @@ function createGatewayRelay(
     if (message.type === 'event' && message.event === 'agent' && isRecord(message.payload)) {
       const payload = message.payload;
       const runId = typeof payload.runId === 'string' ? payload.runId : undefined;
+      const sessionKey = typeof payload.sessionKey === 'string' ? payload.sessionKey : undefined;
       const data = isRecord(payload.data) ? payload.data : null;
       if (payload.stream === 'tool' && data?.phase === 'start' && typeof data.toolCallId === 'string' && typeof data.name === 'string') {
-        pendingTools.set(data.toolCallId, {
+        pendingTools.set(getPendingToolKey(runId, data.toolCallId), {
           runId,
+          sessionKey,
+          toolCallId: data.toolCallId,
           toolName: data.name,
           startedAt: Date.now(),
         });
@@ -386,15 +436,17 @@ function createGatewayRelay(
       }
 
       if (payload.stream === 'tool' && data?.phase === 'result' && typeof data.toolCallId === 'string') {
-        const pendingTool = pendingTools.get(data.toolCallId);
+        const pendingToolKey = resolvePendingToolKey({ runId, sessionKey, toolCallId: data.toolCallId });
+        if (!pendingToolKey) return;
+        const pendingTool = pendingTools.get(pendingToolKey);
         if (!pendingTool) return;
-        pendingTools.delete(data.toolCallId);
+        pendingTools.delete(pendingToolKey);
         recordToolCompleted(pendingTool, true);
         return;
       }
 
       if (payload.stream === 'lifecycle' && (data?.phase === 'end' || data?.phase === 'error')) {
-        flushPendingToolsForRun(runId, false);
+        flushPendingToolsForFailure(runId, sessionKey);
       }
       return;
     }
@@ -402,7 +454,10 @@ function createGatewayRelay(
     if (message.type === 'event' && message.event === 'chat' && isRecord(message.payload)) {
       const payload = message.payload;
       if (payload.state === 'error' || payload.state === 'aborted') {
-        flushPendingToolsForRun(typeof payload.runId === 'string' ? payload.runId : undefined, false);
+        flushPendingToolsForFailure(
+          typeof payload.runId === 'string' ? payload.runId : undefined,
+          typeof payload.sessionKey === 'string' ? payload.sessionKey : undefined,
+        );
       }
     }
   }

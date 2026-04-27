@@ -18,7 +18,7 @@ import {
   pickDefaultSessionKey,
   getRootAgentId,
 } from '@/features/sessions/sessionKeys';
-import { emitBranchCreated, emitSessionOpened } from '@/features/telemetry/telemetryClient';
+import { emitBranchCreated, emitBranchSwitched, emitSessionOpened } from '@/features/telemetry/telemetryClient';
 
 const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'started']);
 const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed']);
@@ -866,8 +866,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const descendants = findDescendantSessionKeys(sessionKey, authoritativeSessions);
     const keysToDelete = [...descendants, sessionKey];
     const shouldReplaceCurrent = keysToDelete.includes(currentSessionRef.current);
+    const previousRootSessionKey = currentSessionRef.current
+      ? getRootAgentSessionKey(currentSessionRef.current)
+      : null;
     const remaining = sessionsRef.current.filter(s => !keysToDelete.includes(getSessionKey(s)));
     const nextCurrentSession = shouldReplaceCurrent ? pickDefaultSessionKey(remaining) : currentSessionRef.current;
+    const nextRootSessionKey = nextCurrentSession
+      ? getRootAgentSessionKey(nextCurrentSession)
+      : null;
 
     for (const key of keysToDelete) {
       await rpc('sessions.delete', { key, deleteTranscript: true });
@@ -882,6 +888,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     if (shouldReplaceCurrent) {
       applyCurrentSession(nextCurrentSession, { emitTelemetry: false });
+      if (previousRootSessionKey && nextRootSessionKey && previousRootSessionKey !== nextRootSessionKey) {
+        void emitBranchSwitched({ success: true });
+      }
     }
   }, [applyCurrentSession, findDescendantSessionKeys, listAuthoritativeSessions, rpc]);
 
