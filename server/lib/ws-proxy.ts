@@ -48,6 +48,7 @@ interface PendingRequest {
   sessionKey?: string;
   sentAt: number;
   markSessionsFeatureUsedOnSuccess?: boolean;
+  clearSessionSeenOnSuccess?: boolean;
 }
 
 interface PendingTool {
@@ -82,10 +83,25 @@ function extractSessionKey(params: unknown): string | undefined {
   return typeof sessionKey === 'string' ? sessionKey : undefined;
 }
 
+function requestBootstrapsRootSession(method: string, params: unknown): boolean {
+  if (method !== 'sessions.patch' || !isRecord(params)) {
+    return false;
+  }
+
+  const sessionKey = extractSessionKey(params);
+  return isRootSessionKey(sessionKey)
+    && Object.prototype.hasOwnProperty.call(params, 'label')
+    && (
+      Object.prototype.hasOwnProperty.call(params, 'model')
+      || Object.prototype.hasOwnProperty.call(params, 'thinkingLevel')
+    );
+}
+
 function requestChangesSessionLabel(method: string, params: unknown): boolean {
   return method === 'sessions.patch'
     && isRecord(params)
-    && Object.prototype.hasOwnProperty.call(params, 'label');
+    && Object.prototype.hasOwnProperty.call(params, 'label')
+    && !requestBootstrapsRootSession(method, params);
 }
 
 /** Active WSS instances — used for graceful shutdown */
@@ -291,7 +307,7 @@ function createGatewayRelay(
     runInBackground(telemetry.markFeatureUsed('sessions'));
   }
 
-  function clearDeletedRootSession(sessionKey: string | undefined): void {
+  function clearRootSessionSeen(sessionKey: string | undefined): void {
     const telemetry = getTelemetryRuntime();
     if (!telemetry || !isRootSessionKey(sessionKey)) {
       return;
@@ -348,8 +364,8 @@ function createGatewayRelay(
           if (request.markSessionsFeatureUsedOnSuccess) {
             markSessionsFeatureUsed();
           }
-          if (request.method === 'sessions.delete') {
-            clearDeletedRootSession(request.sessionKey);
+          if (request.clearSessionSeenOnSuccess) {
+            clearRootSessionSeen(request.sessionKey);
           }
         }
       }
@@ -396,15 +412,19 @@ function createGatewayRelay(
       return;
     }
 
+    const sessionKey = extractSessionKey(message.params);
     const markSessionsFeatureUsedOnSuccess = isControlUiClient
       && (requestChangesSessionLabel(message.method, message.params) || message.method === 'sessions.delete');
+    const clearSessionSeenOnSuccess = isControlUiClient
+      && (message.method === 'sessions.delete' || requestBootstrapsRootSession(message.method, message.params));
 
-    if (message.method === 'chat.send' || markSessionsFeatureUsedOnSuccess) {
+    if (message.method === 'chat.send' || markSessionsFeatureUsedOnSuccess || clearSessionSeenOnSuccess) {
       pendingRequests.set(message.id, {
         method: message.method,
-        sessionKey: extractSessionKey(message.params),
+        sessionKey,
         sentAt: Date.now(),
         markSessionsFeatureUsedOnSuccess,
+        clearSessionSeenOnSuccess,
       });
     }
   }
@@ -658,8 +678,8 @@ function createGatewayRelay(
               if (requestChangesSessionLabel(method, params) || method === 'sessions.delete') {
                 markSessionsFeatureUsed();
               }
-              if (method === 'sessions.delete') {
-                clearDeletedRootSession(extractSessionKey(params));
+              if (method === 'sessions.delete' || requestBootstrapsRootSession(method, params)) {
+                clearRootSessionSeen(extractSessionKey(params));
               }
             })
             .catch((err) => {

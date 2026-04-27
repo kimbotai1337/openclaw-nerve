@@ -948,6 +948,42 @@ describe('ws-proxy', () => {
       ws.close();
     });
 
+    it('does not mark sessions usage for root bootstrap patches and clears stale root state', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws);
+
+      ws.send(JSON.stringify({
+        type: 'req',
+        method: 'sessions.patch',
+        id: 'patch-root-bootstrap-1',
+        params: {
+          key: 'agent:reviewer:main',
+          label: 'Reviewer',
+          model: 'openai/gpt-5.4',
+          thinkingLevel: null,
+        },
+      }));
+
+      await waitForJsonMessage(ws, (message) => message.type === 'res' && message.id === 'patch-root-bootstrap-1');
+
+      await vi.waitFor(() => {
+        expect(mockedGatewayRpcCall).toHaveBeenCalledWith('sessions.patch', {
+          key: 'agent:reviewer:main',
+          label: 'Reviewer',
+          model: 'openai/gpt-5.4',
+          thinkingLevel: null,
+        });
+        expect(telemetryRuntimeMock.clearSessionSeen).toHaveBeenCalledWith('agent:reviewer:main');
+      });
+
+      expect(telemetryRuntimeMock.markFeatureUsed).not.toHaveBeenCalled();
+
+      ws.close();
+    });
+
     it('marks the sessions feature used when a session is deleted', async () => {
       const ws = new WebSocket(
         `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
@@ -1046,6 +1082,45 @@ describe('ws-proxy', () => {
         expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('sessions');
         expect(telemetryRuntimeMock.clearSessionSeen).toHaveBeenCalledWith('agent:main:main');
       });
+
+      ws.close();
+    });
+
+    it('does not mark sessions usage for control-ui root bootstrap patches and clears stale root state', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws, 'connect-control-bootstrap-1', 'openclaw-control-ui');
+      mockGw.clearReceived();
+
+      ws.send(JSON.stringify({
+        type: 'req',
+        method: 'sessions.patch',
+        id: 'patch-control-root-bootstrap-1',
+        params: {
+          key: 'agent:reviewer:main',
+          label: 'Reviewer',
+          model: 'openai/gpt-5.4',
+          thinkingLevel: null,
+        },
+      }));
+
+      await mockGw.expectMessages(1);
+      mockGw.broadcast(JSON.stringify({
+        type: 'res',
+        id: 'patch-control-root-bootstrap-1',
+        ok: true,
+        payload: { ok: true },
+      }));
+      await waitForJsonMessage(ws, (message) => message.type === 'res' && message.id === 'patch-control-root-bootstrap-1');
+
+      await vi.waitFor(() => {
+        expect(mockedGatewayRpcCall).not.toHaveBeenCalled();
+        expect(telemetryRuntimeMock.clearSessionSeen).toHaveBeenCalledWith('agent:reviewer:main');
+      });
+
+      expect(telemetryRuntimeMock.markFeatureUsed).not.toHaveBeenCalled();
 
       ws.close();
     });
