@@ -117,6 +117,86 @@ describe('normalized realtime events', () => {
       .toBeGreaterThan((first[1] as Extract<RealtimeEvent, { type: 'message.delta_applied' }>).revision);
   });
 
+  it('normalizes runId-less chat streams into a deterministic session-scoped fallback run', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(142);
+
+    const deltaEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 52,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'partial' }] },
+      },
+    };
+
+    const finalEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 53,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: 'final',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], createdAt: 141 },
+      },
+    };
+
+    expect(normalizeGatewayEvent(deltaEvent)).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:142:run-fallback:agent:main:main:delta',
+        receivedAt: 142,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-fallback:agent:main:main',
+        status: 'running',
+        finalized: false,
+      },
+      {
+        type: 'message.delta_applied',
+        eventId: 'chat:142:run-fallback:agent:main:main:message',
+        receivedAt: 142,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-fallback:agent:main:main',
+        messageId: 'run-fallback:agent:main:main:assistant',
+        text: 'partial',
+        revision: 52,
+      },
+    ]);
+
+    expect(normalizeGatewayEvent(finalEvent)).toEqual([
+      {
+        type: 'run.status_changed',
+        eventId: 'chat:142:run-fallback:agent:main:main:final',
+        receivedAt: 142,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-fallback:agent:main:main',
+        status: 'completed',
+        finalized: true,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'chat:142:run-fallback:agent:main:main:committed',
+        receivedAt: 142,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'run-fallback:agent:main:main:assistant',
+          sessionId: 'agent:main:main',
+          runId: 'run-fallback:agent:main:main',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'done' }],
+          status: 'committed',
+          revision: 53,
+          createdAt: 141,
+        },
+      },
+    ]);
+  });
+
   it('maps an agent lifecycle event into presence update when a phase exists', () => {
     vi.spyOn(Date, 'now').mockReturnValue(30);
 

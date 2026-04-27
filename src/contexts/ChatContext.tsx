@@ -143,18 +143,63 @@ function findHistoryMetadataSource(
   return bestMatch;
 }
 
+function buildComparableRealtimeChatMsg(message: RealtimeMessageEntity): ChatMsg {
+  return {
+    msgId: message.messageId,
+    role: message.role,
+    html: '',
+    rawText: message.contentParts.map((part) => part.text).join(''),
+    timestamp: new Date(message.createdAt),
+  };
+}
+
+function isDurableAssistantHistoryMessage(message: ChatMsg): boolean {
+  if (message.role !== 'assistant') return false;
+  if (message.pending || message.failed || message.toolGroup || message.intermediate || message.isThinking) {
+    return false;
+  }
+  return true;
+}
+
+function shouldDeferRealtimeProjection(
+  existingMessages: ChatMsg[],
+  visibleRealtimeMessages: RealtimeMessageEntity[],
+  reconcileNeeded: boolean,
+): boolean {
+  if (!reconcileNeeded) return false;
+
+  const existingAssistantHistory = existingMessages.filter(isDurableAssistantHistoryMessage);
+  if (existingAssistantHistory.length === 0) return false;
+
+  const visibleRealtimeAssistants = visibleRealtimeMessages.filter((message) => message.role === 'assistant');
+  if (visibleRealtimeAssistants.length < existingAssistantHistory.length) return true;
+
+  const claimedHistorySourceIndices = new Set<number>();
+  let overlapCount = 0;
+  for (const message of visibleRealtimeAssistants) {
+    const historyMatch = findHistoryMetadataSource(
+      existingAssistantHistory,
+      buildComparableRealtimeChatMsg(message),
+      claimedHistorySourceIndices,
+    );
+    if (!historyMatch) continue;
+    claimedHistorySourceIndices.add(historyMatch.index);
+    overlapCount += 1;
+  }
+
+  return overlapCount < Math.min(existingAssistantHistory.length, visibleRealtimeAssistants.length);
+}
+
 function mapRealtimeMessageToChatMsg(
   message: RealtimeMessageEntity,
   existingMessages: ChatMsg[],
   claimedSourceIndices: Set<number>,
 ): ChatMsg {
-  const rawText = message.contentParts.map((part) => part.text).join('');
+  const comparableMessage = buildComparableRealtimeChatMsg(message);
+  const rawText = comparableMessage.rawText;
   const baseMessage: ChatMsg = {
-    msgId: message.messageId,
-    role: message.role,
+    ...comparableMessage,
     html: rawText.length > 0 ? renderToolResults(renderMarkdown(rawText)) : '',
-    rawText,
-    timestamp: new Date(message.createdAt),
     streaming: false,
     charts: message.charts,
     uploadAttachments: message.uploadAttachments,
@@ -386,6 +431,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (visibleRealtimeMessages.length === 0) return;
 
     const existingMessages = getAllMessages();
+    if (shouldDeferRealtimeProjection(
+      existingMessages,
+      visibleRealtimeMessages,
+      realtimeState.connection.reconcileNeeded,
+    )) {
+      return;
+    }
+
     const claimedHistorySourceIndices = new Set<number>();
     const durableMessages = visibleRealtimeMessages.map((message) =>
       mapRealtimeMessageToChatMsg(message, existingMessages, claimedHistorySourceIndices),
@@ -396,7 +449,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const mergedMessages = mergeFinalMessages(durableMessages, overlayMessages);
 
     applyMessageWindow(mergedMessages, false);
-  }, [applyMessageWindow, currentSession, getAllMessages, realtimeState]);
+  }, [
+    applyMessageWindow,
+    currentSession,
+    getAllMessages,
+    realtimeState.connection.reconcileNeeded,
+    realtimeState.messages,
+  ]);
 
   // ─── Watchdog: if stream stalls, recover once ─────────────────────────────
   useEffect(() => {

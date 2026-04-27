@@ -17,6 +17,22 @@ describe('realtime selectors', () => {
     expect(selectRealtimeStatus(state)).toBe('syncing');
   });
 
+  it('returns offline while reconcile is pending if transport is offline', () => {
+    const state = createInitialRealtimeState();
+    state.connection.status = 'offline';
+    state.connection.reconcileNeeded = true;
+
+    expect(selectRealtimeStatus(state)).toBe('offline');
+  });
+
+  it('returns reconnecting while reconcile is pending if transport is reconnecting', () => {
+    const state = createInitialRealtimeState();
+    state.connection.status = 'reconnecting';
+    state.connection.reconcileNeeded = true;
+
+    expect(selectRealtimeStatus(state)).toBe('reconnecting');
+  });
+
   it('returns degraded once reconcile is no longer pending', () => {
     const state = createInitialRealtimeState();
     state.connection.status = 'degraded';

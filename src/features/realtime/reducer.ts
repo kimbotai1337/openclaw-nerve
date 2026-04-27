@@ -101,7 +101,6 @@ function isFreshSnapshot(state: RealtimeState, snapshot: RealtimeSnapshotPayload
   const currentSession = state.sessions[sessionId];
   const currentWatermark = getSessionStateWatermark(state, sessionId);
   if (currentSession && snapshot.session.updatedAt < currentSession.updatedAt) return false;
-  if (snapshot.recoveredAt < currentWatermark) return false;
 
   if (
     currentSession &&
@@ -225,7 +224,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
 
     case 'run.status_changed':
       if (next.runs[event.runId]?.finalized) return next;
-      if ((next.runs[event.runId]?.lastEventAt ?? -Infinity) > event.receivedAt) return next;
+      if (!event.finalized && (next.runs[event.runId]?.lastEventAt ?? -Infinity) > event.receivedAt) return next;
 
       upsertRun(next, {
         ...(next.runs[event.runId] ?? {
@@ -237,7 +236,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
           finalized: false,
         }),
         status: event.status,
-        lastEventAt: event.receivedAt,
+        lastEventAt: Math.max(next.runs[event.runId]?.lastEventAt ?? 0, event.receivedAt),
         finalized: event.finalized,
       } as RealtimeRunEntity);
       return next;

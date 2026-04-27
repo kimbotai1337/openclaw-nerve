@@ -122,7 +122,7 @@ describe('ChatContext subscription stability', () => {
       return null;
     }
 
-    render(
+    const view = render(
       <ChatProvider>
         <Consumer />
       </ChatProvider>,
@@ -661,7 +661,7 @@ describe('ChatContext subscription stability', () => {
         timestamp: new Date(10),
       },
     ];
-    const { ChatProvider, useChat, gatewayState } = await setup({
+    const { ChatProvider, useChat, gatewayState, realtimeStateRef } = await setup({
       currentSession: 'main',
       realtimeState: {
         connection: {
@@ -945,5 +945,119 @@ describe('ChatContext subscription stability', () => {
     });
 
     expect(visibleIsGenerating).toBe(true);
+  });
+
+  it('does not replace loaded assistant history with partial realtime messages while reconcile is pending', async () => {
+    const historyMessages: ChatMsg[] = [
+      {
+        msgId: 'history-user',
+        role: 'user',
+        html: '<p>Question</p>',
+        rawText: 'Question',
+        timestamp: new Date(10),
+      },
+      {
+        msgId: 'history-assistant-1',
+        role: 'assistant',
+        html: '<p>Earlier answer</p>',
+        rawText: 'Earlier answer',
+        timestamp: new Date(20),
+      },
+      {
+        msgId: 'history-assistant-2',
+        role: 'assistant',
+        html: '<p>Second answer</p>',
+        rawText: 'Second answer',
+        timestamp: new Date(30),
+      },
+    ];
+
+    const { ChatProvider, useChat, gatewayState, realtimeStateRef } = await setup({
+      currentSession: 'main',
+      realtimeState: {
+        connection: {
+          status: 'live',
+          lastLiveAt: 0,
+          lastDisconnectReason: null,
+          reconcileNeeded: true,
+          reconnectAttempt: 0,
+        },
+        sessions: { main: { sessionId: 'main', status: 'running', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' } },
+        runs: {
+          'run-live': {
+            runId: 'run-live',
+            sessionId: 'main',
+            status: 'running',
+            messageIds: ['run-live:assistant'],
+            lastEventAt: 40,
+            finalized: false,
+          },
+        },
+        messages: {
+          'run-live:assistant': {
+            messageId: 'run-live:assistant',
+            sessionId: 'main',
+            runId: 'run-live',
+            role: 'assistant',
+            contentParts: [{ type: 'text', text: 'Fresh partial' }],
+            status: 'streaming',
+            revision: 1,
+            createdAt: 40,
+          },
+        },
+        agentPresence: {},
+      },
+      loadChatHistoryImpl: async () => historyMessages,
+    });
+    gatewayState.connectionState = 'connected';
+
+    let messages: ChatMsg[] = [];
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+      }, [chat.messages]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages.map((message) => message.msgId)).toEqual([
+        'history-user',
+        'history-assistant-1',
+        'history-assistant-2',
+      ]);
+    });
+
+    realtimeStateRef.current = {
+      ...realtimeStateRef.current,
+      messages: {
+        ...realtimeStateRef.current.messages,
+        'run-live:assistant': {
+          ...realtimeStateRef.current.messages['run-live:assistant'],
+          revision: 2,
+        },
+      },
+    };
+
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages.map((message) => message.msgId)).toEqual([
+        'history-user',
+        'history-assistant-1',
+        'history-assistant-2',
+      ]);
+    });
   });
 });

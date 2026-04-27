@@ -6,6 +6,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from 'react';
 import { useGateway } from './GatewayContext';
@@ -36,6 +37,13 @@ function buildLocalEventId(prefix: string, sessionId: string, receivedAt: number
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { connectionState, reconnectAttempt, transportMeta, subscribe } = useGateway();
   const [state, dispatch] = useReducer(realtimeReducer, undefined, createInitialRealtimeState);
+  const connectionStateRef = useRef(connectionState);
+  const reconnectAttemptRef = useRef(reconnectAttempt);
+
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+    reconnectAttemptRef.current = reconnectAttempt;
+  }, [connectionState, reconnectAttempt]);
 
   useEffect(() => {
     const receivedAt = Date.now();
@@ -118,13 +126,24 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       }
 
       dispatch(normalizeSnapshotLoaded(payload.snapshot));
+      const mergedAt = Date.now();
       dispatch({
         type: 'snapshot.merge_completed',
-        eventId: buildLocalEventId('snapshot-merged', sessionId, Date.now()),
-        receivedAt: Date.now(),
+        eventId: buildLocalEventId('snapshot-merged', sessionId, mergedAt),
+        receivedAt: mergedAt,
         source: 'local',
         sessionId,
       });
+      if (connectionStateRef.current === 'connected') {
+        dispatch({
+          type: 'connection.opened',
+          eventId: buildLocalEventId('reconcile-recovered', 'global', mergedAt),
+          receivedAt: mergedAt,
+          source: 'local',
+          sessionId: 'global',
+          reconnectAttempt: reconnectAttemptRef.current,
+        });
+      }
       console.debug('[realtime] snapshot merged', {
         sessionId,
         reason,
@@ -157,12 +176,26 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const effectiveState = useMemo<RealtimeState>(() => {
+    if (connectionState !== 'connecting' || state.connection.status === 'connecting') {
+      return state;
+    }
+
+    return {
+      ...state,
+      connection: {
+        ...state.connection,
+        status: 'connecting',
+      },
+    };
+  }, [connectionState, state]);
+
   const value = useMemo<RealtimeContextValue>(() => ({
-    state,
-    realtimeStatus: selectRealtimeStatus(state),
+    state: effectiveState,
+    realtimeStatus: selectRealtimeStatus(effectiveState),
     dispatch,
     requestSnapshot,
-  }), [state, requestSnapshot]);
+  }), [dispatch, effectiveState, requestSnapshot]);
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }

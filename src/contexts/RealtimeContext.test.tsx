@@ -128,6 +128,27 @@ describe('RealtimeProvider', () => {
     expect(result.current.realtimeStatus).toBe('live');
   });
 
+  it('emits an explicit connecting transport state during the initial handshake', async () => {
+    gatewayMockState.connectionState = 'connecting';
+    gatewayMockState.transportMeta = {
+      lastCloseCode: null,
+      lastCloseReason: null,
+      connectedAt: null,
+    };
+
+    const mod = await import('./RealtimeContext');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <mod.RealtimeProvider>{children}</mod.RealtimeProvider>
+    );
+
+    const { result } = renderHook(() => mod.useRealtime(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.state.connection.status).toBe('connecting');
+      expect(result.current.realtimeStatus).toBe('reconnecting');
+    });
+  });
+
   it('logs snapshot request and merge details while reconcile is pending', async () => {
     const snapshot: RealtimeSnapshotPayload = {
       session: {
@@ -220,6 +241,59 @@ describe('RealtimeProvider', () => {
     expect(result.current.state.connection.status).toBe('degraded');
     expect(result.current.state.connection.reconcileNeeded).toBe(false);
     expect(result.current.realtimeStatus).toBe('degraded');
+  });
+
+  it('clears degraded after a later snapshot reconcile succeeds on the same socket', async () => {
+    const snapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'idle',
+        agentId: 'main',
+        updatedAt: 40,
+        sourceVersion: 'snapshot-3',
+      },
+      runs: [],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 41,
+      source: 'server-reconcile',
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true, snapshot }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mod = await import('./RealtimeContext');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <mod.RealtimeProvider>{children}</mod.RealtimeProvider>
+    );
+
+    const { result } = renderHook(() => mod.useRealtime(), { wrapper });
+
+    await act(async () => {
+      await expect(result.current.requestSnapshot('agent:main:main', 'reconnect')).rejects.toThrow(
+        'snapshot-request-failed:503',
+      );
+    });
+
+    expect(result.current.state.connection.status).toBe('degraded');
+    expect(result.current.realtimeStatus).toBe('degraded');
+
+    await act(async () => {
+      await result.current.requestSnapshot('agent:main:main', 'reconnect');
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.state.connection.status).toBe('live');
+    expect(result.current.state.connection.reconcileNeeded).toBe(false);
+    expect(result.current.realtimeStatus).toBe('live');
   });
 
   it('keeps disconnected transport classified as offline', async () => {

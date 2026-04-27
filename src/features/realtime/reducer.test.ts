@@ -535,6 +535,100 @@ describe('realtimeReducer', () => {
     expect(state.messages['assistant-live']?.messageId).toBe('assistant-live');
   });
 
+  it('accepts a newer snapshot even when browser-stamped activity is ahead of recoveredAt', () => {
+    const freshSnapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'idle',
+        agentId: 'main',
+        updatedAt: 30,
+        sourceVersion: 'v2',
+      },
+      runs: [
+        {
+          runId: 'run-1',
+          sessionId: 'agent:main:main',
+          status: 'completed',
+          messageIds: ['assistant-1'],
+          lastEventAt: 30,
+          finalized: true,
+        },
+      ],
+      messages: [
+        {
+          messageId: 'assistant-1',
+          sessionId: 'agent:main:main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'done' }],
+          status: 'committed',
+          revision: 2,
+          createdAt: 29,
+        },
+      ],
+      agentPresence: null,
+      recoveredAt: 25,
+      source: 'server-reconcile',
+    };
+
+    const state = apply([
+      {
+        type: 'session.upserted',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        session: {
+          sessionId: 'agent:main:main',
+          status: 'running',
+          agentId: 'main',
+          updatedAt: 20,
+          sourceVersion: 'v1',
+        },
+      },
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-2',
+        receivedAt: 100,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'running',
+        finalized: false,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'evt-3',
+        receivedAt: 101,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'assistant-live',
+          sessionId: 'agent:main:main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'draft' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 101,
+        },
+      },
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-4',
+        receivedAt: 102,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot: freshSnapshot,
+      },
+    ]);
+
+    expect(state.sessions['agent:main:main']).toEqual(freshSnapshot.session);
+    expect(state.runs['run-1']).toEqual(freshSnapshot.runs[0]);
+    expect(state.messages['assistant-1']).toEqual(freshSnapshot.messages[0]);
+    expect(state.messages['assistant-live']).toBeUndefined();
+  });
+
   it('ends syncing when a requested snapshot is stale but local state is newer', () => {
     const staleSnapshot: RealtimeSnapshotPayload = {
       session: {
@@ -684,5 +778,55 @@ describe('realtimeReducer', () => {
       lastEventAt: 11,
       finalized: false,
     });
+  });
+
+  it('accepts a finalized live update even when snapshot time is ahead of receivedAt', () => {
+    const snapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'running',
+        agentId: 'main',
+        updatedAt: 200,
+        sourceVersion: 'snapshot-1',
+      },
+      runs: [
+        {
+          runId: 'run-1',
+          sessionId: 'agent:main:main',
+          status: 'running',
+          messageIds: [],
+          lastEventAt: 200,
+          finalized: false,
+        },
+      ],
+      messages: [],
+      agentPresence: null,
+      recoveredAt: 200,
+      source: 'server-reconcile',
+    };
+
+    const state = apply([
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-1',
+        receivedAt: 200,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot,
+      },
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-2',
+        receivedAt: 100,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'completed',
+        finalized: true,
+      },
+    ]);
+
+    expect(state.runs['run-1']?.status).toBe('completed');
+    expect(state.runs['run-1']?.finalized).toBe(true);
   });
 });

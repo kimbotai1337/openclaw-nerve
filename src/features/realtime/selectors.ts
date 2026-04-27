@@ -25,10 +25,10 @@ export function isTerminalAgentPhase(phase: string | null | undefined) {
 }
 
 export function selectRealtimeStatus(state: RealtimeState): RealtimeUiStatus {
+  if (state.connection.status === 'offline') return 'offline';
+  if (state.connection.status === 'reconnecting' || state.connection.status === 'connecting') return 'reconnecting';
   if (state.connection.reconcileNeeded) return 'syncing';
   if (state.connection.status === 'degraded') return 'degraded';
-  if (state.connection.status === 'reconnecting' || state.connection.status === 'connecting') return 'reconnecting';
-  if (state.connection.status === 'offline') return 'offline';
   return 'live';
 }
 
