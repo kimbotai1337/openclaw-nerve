@@ -29,6 +29,7 @@ describe('useChatRecovery', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     loadChatHistoryMock.mockReset();
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -100,6 +101,45 @@ describe('useChatRecovery', () => {
     });
 
     expect(requestSnapshot).toHaveBeenCalledWith('agent:main:main', 'missing-run-activity');
+  });
+
+  it('repairs visible history even when snapshot reconcile fails', async () => {
+    const requestSnapshot = vi.fn(async () => {
+      throw new Error('snapshot-down');
+    });
+    const rpc = vi.fn(async () => ({}));
+    const applyMessageWindow = vi.fn();
+    loadChatHistoryMock.mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useChatRecovery({
+        rpc,
+        requestSnapshot,
+        currentSessionRef: { current: 'agent:main:main' },
+        isGeneratingRef: { current: true },
+        activeRunIdRef: { current: 'run-1' },
+        runsRef: { current: new Map<string, RunState>() },
+        getAllMessages: () => [],
+        applyMessageWindow,
+        setStream: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.triggerRecovery('reconnect');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180);
+    });
+
+    expect(requestSnapshot).toHaveBeenCalledWith('agent:main:main', 'reconnect');
+    expect(loadChatHistoryMock).toHaveBeenCalledWith({
+      rpc,
+      sessionKey: 'agent:main:main',
+      limit: 120,
+    });
+    expect(applyMessageWindow).toHaveBeenCalledWith([], false);
   });
 
   it('drops stale pending recovery when the generation changes first', async () => {

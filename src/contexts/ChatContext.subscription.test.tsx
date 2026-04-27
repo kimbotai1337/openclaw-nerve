@@ -13,17 +13,27 @@ describe('ChatContext subscription stability', () => {
   async function setup() {
     const subscribeMock = vi.fn(() => () => {});
     const requestSnapshotMock = vi.fn(async () => {});
+    const loadChatHistoryMock = vi.fn(async () => []);
     const rpcMock = vi.fn(async (method: string) => {
       if (method === 'chat.send') return { runId: 'run-1', status: 'started' };
       return {};
     });
+    const gatewayState = {
+      connectionState: 'disconnected' as 'disconnected' | 'connecting' | 'connected' | 'reconnecting',
+      rpc: rpcMock,
+      subscribe: subscribeMock,
+    };
+
+    vi.doMock('@/features/chat/operations', async () => {
+      const actual = await vi.importActual<typeof import('@/features/chat/operations')>('@/features/chat/operations');
+      return {
+        ...actual,
+        loadChatHistory: loadChatHistoryMock,
+      };
+    });
 
     vi.doMock('./GatewayContext', () => ({
-      useGateway: () => ({
-        connectionState: 'disconnected',
-        rpc: rpcMock,
-        subscribe: subscribeMock,
-      }),
+      useGateway: () => gatewayState,
     }));
 
     vi.doMock('./SessionContext', () => ({
@@ -47,7 +57,7 @@ describe('ChatContext subscription stability', () => {
     }));
 
     const mod = await import('./ChatContext');
-    return { ...mod, subscribeMock };
+    return { ...mod, gatewayState, subscribeMock, loadChatHistoryMock };
   }
 
   it('keeps a single subscribe registration after handleSend-triggered rerender', async () => {
@@ -78,5 +88,43 @@ describe('ChatContext subscription stability', () => {
 
     // Regression assertion: local state updates should not cause resubscription churn.
     expect(subscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads history after reconnect when the session was idle', async () => {
+    const { ChatProvider, gatewayState, loadChatHistoryMock } = await setup();
+
+    function Consumer() {
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(loadChatHistoryMock).not.toHaveBeenCalled());
+
+    gatewayState.connectionState = 'reconnecting';
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    gatewayState.connectionState = 'connected';
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(loadChatHistoryMock).toHaveBeenCalledWith({
+        rpc: expect.any(Function),
+        sessionKey: 'main',
+        limit: 500,
+      });
+    });
   });
 });

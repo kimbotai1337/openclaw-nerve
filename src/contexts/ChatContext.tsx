@@ -230,10 +230,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     historyLoadConnectionStateRef.current = connectionState;
 
     if (connectionState !== 'connected' || !currentSession) return;
-    if (prevConnection === 'reconnecting') return;
+    if (prevConnection === 'reconnecting' && wasGeneratingOnDisconnect()) return;
 
     void loadHistory(currentSession);
-  }, [connectionState, currentSession, loadHistory]);
+  }, [connectionState, currentSession, loadHistory, wasGeneratingOnDisconnect]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────
   const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;
