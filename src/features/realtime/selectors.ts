@@ -1,4 +1,28 @@
-import type { RealtimeMessageEntity, RealtimeState, RealtimeUiStatus } from './types';
+import type { RealtimeMessageEntity, RealtimeRunStatus, RealtimeState, RealtimeUiStatus } from './types';
+
+const ACTIVE_RUN_STATUSES = new Set<RealtimeRunStatus>(['queued', 'running']);
+const TERMINAL_AGENT_PHASES = new Set([
+  'aborted',
+  'cancelled',
+  'completed',
+  'done',
+  'end',
+  'ended',
+  'error',
+  'final',
+  'finished',
+  'stopped',
+  'timeout',
+]);
+
+function normalizeAgentPhase(phase: string | null | undefined) {
+  return typeof phase === 'string' ? phase.trim().toLowerCase() : null;
+}
+
+export function isTerminalAgentPhase(phase: string | null | undefined) {
+  const normalized = normalizeAgentPhase(phase);
+  return normalized ? TERMINAL_AGENT_PHASES.has(normalized) : false;
+}
 
 export function selectRealtimeStatus(state: RealtimeState): RealtimeUiStatus {
   if (state.connection.reconcileNeeded) return 'syncing';
@@ -20,4 +44,17 @@ export function selectVisibleMessagesForSession(state: RealtimeState, sessionId:
 
 export function selectSessionAgentPresence(state: RealtimeState, sessionId: string) {
   return state.agentPresence[sessionId] ?? null;
+}
+
+export function selectSessionIsGenerating(state: RealtimeState, sessionId: string): boolean {
+  const phase = normalizeAgentPhase(state.agentPresence[sessionId]?.phase);
+  if (phase && phase !== 'idle' && !TERMINAL_AGENT_PHASES.has(phase)) {
+    return true;
+  }
+
+  return Object.values(state.runs).some((run) =>
+    run.sessionId === sessionId
+    && !run.finalized
+    && ACTIVE_RUN_STATUSES.has(run.status),
+  );
 }

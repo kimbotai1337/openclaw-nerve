@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialRealtimeState } from './reducer';
-import { selectRealtimeStatus, selectSessionAgentPresence, selectVisibleMessagesForSession } from './selectors';
+import {
+  isTerminalAgentPhase,
+  selectRealtimeStatus,
+  selectSessionAgentPresence,
+  selectSessionIsGenerating,
+  selectVisibleMessagesForSession,
+} from './selectors';
 
 describe('realtime selectors', () => {
   it('returns syncing when reconcile is in progress', () => {
@@ -102,5 +108,33 @@ describe('realtime selectors', () => {
       lastSeenAt: 10,
     });
     expect(selectSessionAgentPresence(state, 'agent:other:other')).toBeNull();
+  });
+
+  it('derives generating from local queued runs before agent presence catches up', () => {
+    const state = createInitialRealtimeState();
+    state.runs['run-1'] = {
+      runId: 'run-1',
+      sessionId: 'agent:main:main',
+      status: 'queued',
+      messageIds: [],
+      lastEventAt: 10,
+      finalized: false,
+    };
+
+    expect(selectSessionIsGenerating(state, 'agent:main:main')).toBe(true);
+  });
+
+  it('treats terminal agent phases as not generating', () => {
+    const state = createInitialRealtimeState();
+    state.agentPresence['agent:main:main'] = {
+      sessionId: 'agent:main:main',
+      agentId: 'main',
+      phase: 'cancelled',
+      lastSeenAt: 10,
+    };
+
+    expect(selectSessionIsGenerating(state, 'agent:main:main')).toBe(false);
+    expect(isTerminalAgentPhase('cancelled')).toBe(true);
+    expect(isTerminalAgentPhase('running')).toBe(false);
   });
 });

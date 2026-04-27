@@ -19,7 +19,7 @@ import { useGateway } from './GatewayContext';
 import { useRealtime } from './RealtimeContext';
 import { useSessionContext } from './SessionContext';
 import { useSettings } from './SettingsContext';
-import { getSessionKey, type GatewayEvent } from '@/types';
+import type { GatewayEvent } from '@/types';
 import {
   getRootAgentSessionKey,
   isRootChildSession,
@@ -27,7 +27,6 @@ import {
   isTopLevelAgentSessionKey,
 } from '@/features/sessions/sessionKeys';
 import {
-  loadChatHistory,
   processChatMessages,
   buildUserMessage,
   sendChatMessage,
@@ -45,11 +44,26 @@ import {
   createFallbackRunId,
   updateHighestSeq,
 } from '@/features/chat/operations';
+import { normalizeLocalRunCreated } from '@/features/realtime/normalizedEvent';
+import {
+  isTerminalAgentPhase,
+  selectSessionAgentPresence,
+  selectSessionIsGenerating,
+  selectVisibleMessagesForSession,
+} from '@/features/realtime/selectors';
 import { generateMsgId } from '@/features/chat/types';
 import type { ImageAttachment, ChatMsg, OutgoingUploadPayload } from '@/features/chat/types';
 import type { RecoveryReason, RunState } from '@/features/chat/operations';
+import type { RealtimeMessageEntity } from '@/features/realtime/types';
+import { renderMarkdown, renderToolResults } from '@/utils/helpers';
 
-import { useChatMessages, mergeFinalMessages, patchThinkingDuration } from '@/hooks/useChatMessages';
+import {
+  useChatMessages,
+  isLikelyDuplicateMessage,
+  mergeFinalMessages,
+  normalizeComparableText,
+  patchThinkingDuration,
+} from '@/hooks/useChatMessages';
 import { useChatStreaming } from '@/hooks/useChatStreaming';
 import { useChatRecovery } from '@/hooks/useChatRecovery';
 import { useChatTTS } from '@/hooks/useChatTTS';
@@ -100,14 +114,75 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
+function findHistoryMetadataSource(existingMessages: ChatMsg[], message: ChatMsg): ChatMsg | null {
+  const normalizedText = normalizeComparableText(message.rawText);
+  const messageTimestamp = message.timestamp.getTime();
+
+  return existingMessages.find((candidate) =>
+    !candidate.pending
+    && !candidate.failed
+    && !candidate.toolGroup
+    && !candidate.intermediate
+    && !candidate.isThinking
+    && candidate.role === message.role
+    && normalizeComparableText(candidate.rawText) === normalizedText
+    && Math.abs(candidate.timestamp.getTime() - messageTimestamp) <= 60_000,
+  ) ?? null;
+}
+
+function mapRealtimeMessageToChatMsg(
+  message: RealtimeMessageEntity,
+  existingMessages: ChatMsg[],
+): ChatMsg {
+  const rawText = message.contentParts.map((part) => part.text).join('');
+  const baseMessage: ChatMsg = {
+    msgId: message.messageId,
+    role: message.role,
+    html: rawText.length > 0 ? renderToolResults(renderMarkdown(rawText)) : '',
+    rawText,
+    timestamp: new Date(message.createdAt),
+    streaming: false,
+    charts: message.charts,
+    uploadAttachments: message.uploadAttachments,
+  };
+  const metadataSource = findHistoryMetadataSource(existingMessages, baseMessage);
+  if (!metadataSource) return baseMessage;
+
+  return {
+    ...baseMessage,
+    msgId: metadataSource.msgId ?? baseMessage.msgId,
+    collapsed: metadataSource.collapsed,
+    charts: baseMessage.charts ?? metadataSource.charts,
+    uploadAttachments: baseMessage.uploadAttachments ?? metadataSource.uploadAttachments,
+    images: metadataSource.images,
+    extractedImages: metadataSource.extractedImages,
+    isVoice: metadataSource.isVoice,
+    isSystemNotification: metadataSource.isSystemNotification,
+    systemLabel: metadataSource.systemLabel,
+  };
+}
+
+function shouldPreserveOverlayMessage(message: ChatMsg, realtimeMessages: ChatMsg[]): boolean {
+  if (message.pending || message.failed) return true;
+  if (message.role === 'tool' || message.role === 'toolResult' || message.role === 'event') return true;
+  if (message.toolGroup || message.intermediate || message.isThinking) return true;
+
+  if (message.role === 'user' || message.role === 'system') {
+    return !realtimeMessages.some((candidate) => isLikelyDuplicateMessage(candidate, message));
+  }
+
+  return false;
+}
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   const { connectionState, rpc, subscribe } = useGateway();
-  const { requestSnapshot } = useRealtime();
-  const { currentSession, sessions } = useSessionContext();
+  const { state: realtimeState, dispatch: realtimeDispatch, requestSnapshot } = useRealtime();
+  const { currentSession } = useSessionContext();
   const { soundEnabled, speak } = useSettings();
 
   // ─── Shared state ─────────────────────────────────────────────────────────
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSendPending, setIsSendPending] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   // ─── Refs for stable callback references ──────────────────────────────────
@@ -118,10 +193,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     currentSessionRef.current = currentSession;
-    isGeneratingRef.current = isGenerating;
     soundEnabledRef.current = soundEnabled;
     speakRef.current = speak;
-  }, [currentSession, isGenerating, soundEnabled, speak]);
+  }, [currentSession, soundEnabled, speak]);
 
   // ─── Run state management ─────────────────────────────────────────────────
   const runsRef = useRef<Map<string, RunState>>(new Map());
@@ -181,10 +255,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     resetPlayedSounds,
     handleFinalTTS,
   } = ttsHook;
+  const lastSessionSnapshotRequestRef = useRef<string | null>(null);
+  const previousSubagentPhaseRef = useRef<{ sessionId: string; phase: string | null } | null>(null);
+  const realtimePresence = currentSession
+    ? selectSessionAgentPresence(realtimeState, currentSession)
+    : null;
+  const realtimeIsGenerating = currentSession
+    ? selectSessionIsGenerating(realtimeState, currentSession)
+    : false;
+  const visibleIsGenerating = isSendPending || realtimeIsGenerating;
+
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating || visibleIsGenerating;
+  }, [isGenerating, visibleIsGenerating]);
 
   // ─── Reset transient state on session switch ──────────────────────────────
   useEffect(() => {
     setIsGenerating(false);
+    setIsSendPending(false);
     msgHook.resetMessageState();
     streamHook.resetStreamState();
     recoveryHook.resetRecoveryState();
@@ -246,43 +334,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     reconnectRecoveryOwnsHistoryRef.current = false;
   }, [connectionState, currentSession, loadHistory]);
 
-  // ─── Periodic history poll for sub-agent sessions ─────────────────────────
-  const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;
-  const subagentSessionState = isSubagentSession
-    ? sessions.find(s => getSessionKey(s) === currentSession)?.state?.toLowerCase()
-    : undefined;
-  const DONE_STATES = new Set(['idle', 'done', 'completed', 'error', 'aborted', 'timeout', 'stopped', 'finished', 'ended', 'cancelled']);
-  const isSubagentActive = isSubagentSession && !(subagentSessionState && DONE_STATES.has(subagentSessionState));
-  const subagentPollInFlightRef = useRef(false);
+  useEffect(() => {
+    if (connectionState !== 'connected' || !currentSession) return;
+    if (lastSessionSnapshotRequestRef.current === currentSession) return;
+
+    lastSessionSnapshotRequestRef.current = currentSession;
+    void requestSnapshot(currentSession, 'session-switch');
+  }, [connectionState, currentSession, requestSnapshot]);
 
   useEffect(() => {
-    if (!isSubagentActive || connectionState !== 'connected') return;
+    if (!currentSession) return;
 
-    const pollInterval = setInterval(async () => {
-      if (subagentPollInFlightRef.current) return;
-      subagentPollInFlightRef.current = true;
-      try {
-        const sk = currentSessionRef.current;
-        const result = await loadChatHistory({ rpc, sessionKey: sk, limit: 500 });
-        if (sk !== currentSessionRef.current) return;
-        const prev = getAllMessages();
-        if (
-          result.length === prev.length &&
-          result.length > 0 &&
-          result[result.length - 1]?.rawText === prev[prev.length - 1]?.rawText &&
-          result[result.length - 1]?.role === prev[prev.length - 1]?.role
-        ) return;
-        applyMessageWindow(result, false);
-      } catch { /* best-effort */ } finally {
-        subagentPollInFlightRef.current = false;
-      }
-    }, 3000);
+    const visibleRealtimeMessages = selectVisibleMessagesForSession(realtimeState, currentSession);
+    if (visibleRealtimeMessages.length === 0) return;
 
-    return () => {
-      clearInterval(pollInterval);
-      subagentPollInFlightRef.current = false;
-    };
-  }, [isSubagentActive, connectionState, currentSession, rpc, applyMessageWindow, getAllMessages]);
+    const existingMessages = getAllMessages();
+    const durableMessages = visibleRealtimeMessages.map((message) =>
+      mapRealtimeMessageToChatMsg(message, existingMessages),
+    );
+    const overlayMessages = existingMessages.filter((message) =>
+      shouldPreserveOverlayMessage(message, durableMessages),
+    );
+    const mergedMessages = mergeFinalMessages(durableMessages, overlayMessages);
+
+    applyMessageWindow(mergedMessages, false);
+  }, [applyMessageWindow, currentSession, getAllMessages, realtimeState]);
 
   // ─── Watchdog: if stream stalls, recover once ─────────────────────────────
   useEffect(() => {
@@ -303,6 +379,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     isRecoveryPending,
     triggerRecovery,
   ]);
+
+  useEffect(() => {
+    if (!currentSession || !isSubagentSessionKey(currentSession)) {
+      previousSubagentPhaseRef.current = null;
+      return;
+    }
+
+    const phase = realtimePresence?.phase ?? null;
+    const previous = previousSubagentPhaseRef.current;
+    previousSubagentPhaseRef.current = { sessionId: currentSession, phase };
+
+    const previousPhase = previous?.sessionId === currentSession ? previous.phase : null;
+    const enteredTerminalPhase =
+      isTerminalAgentPhase(phase)
+      && previousPhase !== null
+      && !isTerminalAgentPhase(previousPhase);
+
+    if (!enteredTerminalPhase) return;
+    void requestSnapshot(currentSession, 'subagent-complete');
+  }, [currentSession, realtimePresence?.phase, requestSnapshot]);
 
   // ─── Subscribe to streaming events ────────────────────────────────────────
   useEffect(() => {
@@ -612,6 +708,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ─── Send message ─────────────────────────────────────────────────────────
   const handleSend = useCallback(async (text: string, images?: ImageAttachment[], uploadPayload?: OutgoingUploadPayload) => {
     ttsHook.trackVoiceMessage(text);
+    const sessionKey = currentSessionRef.current;
 
     const { msg: userMsg, tempId } = buildUserMessage({ text, images, uploadPayload });
 
@@ -621,6 +718,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     msgHook.setAllMessages(prev => [...prev, userMsg]);
     msgHook.setMessages((prev: ChatMsg[]) => [...prev, userMsg]);
     setIsGenerating(true);
+    setIsSendPending(true);
     streamHook.setStream((prev: ChatStreamState) => ({ ...prev, html: '', runId: undefined }));
     setProcessingStage('thinking');
 
@@ -628,7 +726,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const ack = await sendChatMessage({
         rpc,
-        sessionKey: currentSessionRef.current,
+        sessionKey,
         text,
         images,
         uploadPayload,
@@ -636,7 +734,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
 
       if (ack.runId) {
-        const run = getOrCreateRunState(runsRef.current, ack.runId, currentSessionRef.current);
+        realtimeDispatch(normalizeLocalRunCreated(sessionKey, ack.runId, Date.now()));
+      }
+
+      if (currentSessionRef.current !== sessionKey) {
+        setIsSendPending(false);
+        return;
+      }
+
+      if (ack.runId) {
+        const run = getOrCreateRunState(runsRef.current, ack.runId, sessionKey);
         run.status = ack.status;
         run.finalized = false;
         activeRunIdRef.current = ack.runId;
@@ -647,8 +754,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const confirmMsg = (m: ChatMsg) => m.tempId === tempId ? { ...m, pending: false } : m;
       msgHook.setAllMessages(prev => prev.map(confirmMsg));
       msgHook.setMessages((prev: ChatMsg[]) => prev.map(confirmMsg));
+      setIsSendPending(false);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
+
+      if (currentSessionRef.current !== sessionKey) {
+        setIsSendPending(false);
+        return;
+      }
 
       const failMsg = (m: ChatMsg) => m.tempId === tempId ? { ...m, pending: false, failed: true } : m;
       msgHook.setAllMessages(prev => prev.map(failMsg));
@@ -664,8 +777,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       msgHook.setAllMessages(prev => [...prev, errMsgBubble]);
       msgHook.setMessages((prev: ChatMsg[]) => [...prev, errMsgBubble]);
       setIsGenerating(false);
+      setIsSendPending(false);
     }
-  }, [rpc, msgHook, streamHook, ttsHook, incrementGeneration, setProcessingStage, startThinking]);
+  }, [rpc, msgHook, streamHook, ttsHook, incrementGeneration, realtimeDispatch, setProcessingStage, startThinking]);
 
   // ─── Abort / Reset ────────────────────────────────────────────────────────
   const handleAbort = useCallback(async () => {
@@ -714,7 +828,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ─── Context value ────────────────────────────────────────────────────────
   const value = useMemo<ChatContextValue>(() => ({
     messages: msgHook.messages,
-    isGenerating,
+    isGenerating: visibleIsGenerating,
     stream: streamHook.stream,
     processingStage: streamHook.processingStage,
     lastEventTimestamp: lastEventTimestamp,
@@ -731,7 +845,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     cancelReset,
   }), [
     msgHook.messages,
-    isGenerating,
+    visibleIsGenerating,
     streamHook.stream,
     streamHook.processingStage,
     lastEventTimestamp,
