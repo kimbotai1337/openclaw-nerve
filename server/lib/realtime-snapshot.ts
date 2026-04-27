@@ -709,14 +709,16 @@ export async function buildRealtimeSnapshot(
       if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
       return left._sortIndex - right._sortIndex;
     })
-    .map(({ _sortIndex: _ignoredSortIndex, ...message }) => (
-      liveUpdatableAssistantMessageId
-      && message.role === 'assistant'
-      && message.runId === activeRunId
-      && message.messageId === liveUpdatableAssistantMessageId
-        ? { ...message, revision: ACTIVE_SNAPSHOT_ASSISTANT_REVISION }
-        : message
-    ));
+    .map((entry) => {
+      const { _sortIndex, ...message } = entry;
+      void _sortIndex;
+      return liveUpdatableAssistantMessageId
+        && message.role === 'assistant'
+        && message.runId === activeRunId
+        && message.messageId === liveUpdatableAssistantMessageId
+          ? { ...message, revision: ACTIVE_SNAPSHOT_ASSISTANT_REVISION }
+          : message;
+    });
 
   return {
     session: {
