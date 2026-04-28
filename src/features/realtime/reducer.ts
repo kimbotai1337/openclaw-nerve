@@ -100,13 +100,18 @@ function isFreshSnapshot(state: RealtimeState, snapshot: RealtimeSnapshotPayload
 
   const currentSession = state.sessions[sessionId];
   const currentWatermark = getSessionStateWatermark(state, sessionId);
+  const snapshotWatermark = getSnapshotWatermark(snapshot);
   if (currentSession && snapshot.session.updatedAt < currentSession.updatedAt) return false;
+
+  if (!currentSession && snapshotWatermark < currentWatermark) {
+    return false;
+  }
 
   if (
     currentSession &&
     snapshot.session.updatedAt === currentSession.updatedAt &&
     snapshot.session.sourceVersion === currentSession.sourceVersion &&
-    getSnapshotWatermark(snapshot) < currentWatermark
+    snapshotWatermark < currentWatermark
   ) {
     return false;
   }

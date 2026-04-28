@@ -50,7 +50,6 @@ import {
   isTerminalAgentPhase,
   selectSessionAgentPresence,
   selectSessionIsGenerating,
-  selectVisibleMessagesForSession,
 } from '@/features/realtime/selectors';
 import { generateMsgId } from '@/features/chat/types';
 import type { ImageAttachment, ChatMsg, OutgoingUploadPayload } from '@/features/chat/types';
@@ -424,10 +423,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
   }, [connectionState, currentSession, requestSnapshot]);
 
+  const visibleRealtimeMessages = useMemo(
+    () => currentSession
+      ? Object.values(realtimeState.messages)
+        .filter((message) => message.sessionId === currentSession && message.status !== 'superseded')
+        .sort((left, right) => {
+          if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+          if (left.revision !== right.revision) return left.revision - right.revision;
+          return left.messageId.localeCompare(right.messageId);
+        })
+      : [],
+    [currentSession, realtimeState.messages],
+  );
+
   useEffect(() => {
     if (!currentSession) return;
-
-    const visibleRealtimeMessages = selectVisibleMessagesForSession(realtimeState, currentSession);
     if (visibleRealtimeMessages.length === 0) return;
 
     const existingMessages = getAllMessages();
@@ -454,7 +464,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentSession,
     getAllMessages,
     realtimeState.connection.reconcileNeeded,
-    realtimeState.messages,
+    visibleRealtimeMessages,
   ]);
 
   // ─── Watchdog: if stream stalls, recover once ─────────────────────────────

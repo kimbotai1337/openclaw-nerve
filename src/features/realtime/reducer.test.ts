@@ -629,6 +629,92 @@ describe('realtimeReducer', () => {
     expect(state.messages['assistant-live']).toBeUndefined();
   });
 
+  it('rejects a stale snapshot when newer local run and message state exist without session metadata', () => {
+    const staleSnapshot: RealtimeSnapshotPayload = {
+      session: {
+        sessionId: 'agent:main:main',
+        status: 'idle',
+        agentId: 'main',
+        updatedAt: 20,
+        sourceVersion: 'v1',
+      },
+      runs: [
+        {
+          runId: 'run-1',
+          sessionId: 'agent:main:main',
+          status: 'completed',
+          messageIds: ['assistant-stale'],
+          lastEventAt: 20,
+          finalized: true,
+        },
+      ],
+      messages: [
+        {
+          messageId: 'assistant-stale',
+          sessionId: 'agent:main:main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'old snapshot answer' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 20,
+        },
+      ],
+      agentPresence: null,
+      recoveredAt: 30,
+      source: 'server-reconcile',
+    };
+
+    const state = apply([
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-1',
+        receivedAt: 40,
+        source: 'live-agent',
+        sessionId: 'agent:main:main',
+        runId: 'run-1',
+        status: 'running',
+        finalized: false,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'evt-2',
+        receivedAt: 41,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'assistant-live',
+          sessionId: 'agent:main:main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'newer local answer' }],
+          status: 'committed',
+          revision: 2,
+          createdAt: 40,
+        },
+      },
+      {
+        type: 'snapshot.loaded',
+        eventId: 'evt-3',
+        receivedAt: 42,
+        source: 'snapshot',
+        sessionId: 'agent:main:main',
+        snapshot: staleSnapshot,
+      },
+    ]);
+
+    expect(state.runs['run-1']).toMatchObject({
+      status: 'running',
+      finalized: false,
+      lastEventAt: 40,
+    });
+    expect(state.messages['assistant-live']).toMatchObject({
+      messageId: 'assistant-live',
+      revision: 2,
+    });
+    expect(state.messages['assistant-stale']).toBeUndefined();
+  });
+
   it('ends syncing when a requested snapshot is stale but local state is newer', () => {
     const staleSnapshot: RealtimeSnapshotPayload = {
       session: {

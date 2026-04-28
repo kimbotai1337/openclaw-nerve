@@ -122,7 +122,7 @@ describe('ChatContext subscription stability', () => {
       return null;
     }
 
-    const view = render(
+    render(
       <ChatProvider>
         <Consumer />
       </ChatProvider>,
@@ -661,7 +661,7 @@ describe('ChatContext subscription stability', () => {
         timestamp: new Date(10),
       },
     ];
-    const { ChatProvider, useChat, gatewayState, realtimeStateRef } = await setup({
+    const { ChatProvider, useChat, gatewayState } = await setup({
       currentSession: 'main',
       realtimeState: {
         connection: {
@@ -1058,6 +1058,83 @@ describe('ChatContext subscription stability', () => {
         'history-assistant-1',
         'history-assistant-2',
       ]);
+    });
+  });
+
+  it('clears a previously projected realtime transcript when the realtime slice becomes empty', async () => {
+    const { ChatProvider, useChat, gatewayState, realtimeStateRef } = await setup({
+      currentSession: 'main',
+      realtimeState: {
+        connection: {
+          status: 'live',
+          lastLiveAt: 0,
+          lastDisconnectReason: null,
+          reconcileNeeded: false,
+          reconnectAttempt: 0,
+        },
+        sessions: { main: { sessionId: 'main', status: 'idle', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' } },
+        runs: {
+          'run-live': {
+            runId: 'run-live',
+            sessionId: 'main',
+            status: 'completed',
+            messageIds: ['run-live:assistant'],
+            lastEventAt: 20,
+            finalized: true,
+          },
+        },
+        messages: {
+          'run-live:assistant': {
+            messageId: 'run-live:assistant',
+            sessionId: 'main',
+            runId: 'run-live',
+            role: 'assistant',
+            contentParts: [{ type: 'text', text: 'Projected answer' }],
+            status: 'committed',
+            revision: 1,
+            createdAt: 20,
+          },
+        },
+        agentPresence: {},
+      },
+      loadChatHistoryImpl: async () => [],
+    });
+    gatewayState.connectionState = 'connected';
+
+    let messages: ChatMsg[] = [];
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+      }, [chat.messages]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages.map((message) => message.msgId)).toEqual(['run-live:assistant']);
+    });
+
+    realtimeStateRef.current = {
+      ...realtimeStateRef.current,
+      runs: {},
+      messages: {},
+    };
+
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages).toEqual([]);
     });
   });
 });
