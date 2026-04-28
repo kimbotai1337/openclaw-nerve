@@ -216,7 +216,7 @@ function normalizeAssistantText(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
 
-function hasLaterAssistantTextSuperset(
+function hasLaterAssistantTextReplacement(
   messages: ChatMessage[],
   startIndex: number,
   assistantText: string,
@@ -229,6 +229,9 @@ function hasLaterAssistantTextSuperset(
     if (!laterAssistantText) continue;
 
     const normalizedLater = normalizeAssistantText(laterAssistantText);
+    if (normalizedLater === normalizedCurrent) {
+      return true;
+    }
     if (normalizedLater.length > normalizedCurrent.length && normalizedLater.startsWith(normalizedCurrent)) {
       return true;
     }
@@ -264,7 +267,7 @@ function pruneRedundantAssistantPrefixMessages(messages: ChatMessage[]): ChatMes
   return messages.flatMap((message, index) => {
     const assistantText = extractAssistantTextContent(message);
     if (!assistantText) return [message];
-    if (!hasLaterAssistantTextSuperset(messages, index, assistantText)) return [message];
+    if (!hasLaterAssistantTextReplacement(messages, index, assistantText)) return [message];
 
     const strippedMessage = stripAssistantTextFromMessage(message);
     return strippedMessage ? [strippedMessage] : [];
@@ -279,15 +282,18 @@ function appendUniqueAssistantTextMessages(
   const seenAssistantText = new Set(
     result
       .map(extractAssistantTextContent)
-      .filter((text): text is string => Boolean(text)),
+      .filter((text): text is string => Boolean(text))
+      .map((text) => normalizeAssistantText(text))
+      .filter(Boolean),
   );
 
   for (const candidate of candidates) {
     if (!candidate) continue;
     const assistantText = extractAssistantTextContent(candidate);
-    if (!assistantText || seenAssistantText.has(assistantText)) continue;
+    const normalizedAssistantText = assistantText ? normalizeAssistantText(assistantText) : '';
+    if (!normalizedAssistantText || seenAssistantText.has(normalizedAssistantText)) continue;
     result.push(candidate);
-    seenAssistantText.add(assistantText);
+    seenAssistantText.add(normalizedAssistantText);
   }
 
   return result;

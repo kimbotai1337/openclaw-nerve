@@ -305,6 +305,79 @@ describe('extractFinalMessages', () => {
     ]);
     expect(processed.some((message) => message.role === 'tool')).toBe(true);
   });
+
+  it('deduplicates repeated assistant finals that carry the same rendered text', () => {
+    const repeatedFinal = [
+      'Done, another noisy pass landed.',
+      '',
+      'Hit:',
+      '- exec',
+      '- web_search',
+      '',
+      'Interesting wrinkles:',
+      '- browser open hit policy-blocked',
+      '',
+      'If you want, I can do an even dumber one with more edge-case calls.',
+    ].join('\n');
+
+    const processed = processChatMessages(extractFinalMessages({
+      state: 'final',
+      messages: [
+        { role: 'assistant', content: repeatedFinal },
+        { role: 'assistant', content: repeatedFinal },
+      ],
+    }));
+
+    expect(processed.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+      repeatedFinal,
+    ]);
+  });
+
+  it('strips duplicate assistant finals while preserving tool transcript blocks', () => {
+    const processed = processChatMessages(extractFinalMessages({
+      state: 'final',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'exec', input: { cmd: 'pwd' } },
+            { type: 'text', text: 'FINAL_BUBBLE_OK' },
+          ],
+        },
+      ],
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'FINAL_BUBBLE_OK' }],
+      },
+    }));
+
+    expect(processed.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+      'FINAL_BUBBLE_OK',
+    ]);
+    expect(processed.some((message) => message.role === 'tool')).toBe(true);
+  });
+
+  it('drops a redundant assistant prefix bubble created from later text blocks in the same final message', () => {
+    const processed = processChatMessages(extractFinalMessages({
+      state: 'final',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'sessions_list', input: {} },
+            { type: 'text', text: 'FINAL' },
+            { type: 'tool_use', name: 'exec', input: { cmd: 'pwd' } },
+            { type: 'text', text: 'FINAL_DUP_CHECK_3' },
+          ],
+        },
+      ],
+    }));
+
+    expect(processed.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+      'FINAL_DUP_CHECK_3',
+    ]);
+    expect(processed.some((message) => message.role === 'tool')).toBe(true);
+  });
 });
 
 describe('extractFinalMessage', () => {

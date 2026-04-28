@@ -547,6 +547,41 @@ export function groupToolMessages(msgs: ChatMsg[]): ChatMsg[] {
   return grouped;
 }
 
+function normalizeAssistantBubbleText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+function hasLaterAssistantPrefixReplacement(msgs: ChatMsg[], startIndex: number, text: string): boolean {
+  const normalizedCurrent = normalizeAssistantBubbleText(text);
+  if (!normalizedCurrent) return false;
+
+  for (let index = startIndex + 1; index < msgs.length; index++) {
+    const candidate = msgs[index];
+    if (candidate.role === 'user') break;
+    if (candidate.role !== 'assistant' || candidate.isThinking) continue;
+    if (!candidate.rawText.trim()) continue;
+
+    const normalizedLater = normalizeAssistantBubbleText(candidate.rawText);
+    if (!normalizedLater) continue;
+    if (normalizedLater === normalizedCurrent) return true;
+    if (normalizedLater.length > normalizedCurrent.length && normalizedLater.startsWith(normalizedCurrent)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function pruneRedundantAssistantPrefixBubbles(msgs: ChatMsg[]): ChatMsg[] {
+  return msgs.filter((msg, index) => {
+    if (msg.role !== 'assistant' || msg.isThinking) return true;
+    if (!msg.rawText.trim()) return true;
+    if (msg.images?.length || msg.extractedImages?.length || msg.charts?.length) return true;
+
+    return !hasLaterAssistantPrefixReplacement(msgs, index, msg.rawText);
+  });
+}
+
 // ─── Intermediate tagging ──────────────────────────────────────────────────────
 
 /**
@@ -592,7 +627,8 @@ export function processChatMessages(messages: ChatMessage[], options: { sessionK
     .flatMap((message) => splitToolCallMessage(message, options));
 
   const grouped = groupToolMessages(chatMsgs);
-  const tagged = tagIntermediateMessages(grouped);
+  const pruned = pruneRedundantAssistantPrefixBubbles(grouped);
+  const tagged = tagIntermediateMessages(pruned);
 
   // Assign stable IDs to any message missing one (for React keying).
   for (const msg of tagged) {

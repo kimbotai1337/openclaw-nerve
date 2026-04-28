@@ -341,6 +341,8 @@ export function normalizeLocalRunCreated(
   runId: string,
   receivedAt: number,
 ): RealtimeEvent {
+  activeChatRunIdsBySession.set(sessionId, runId);
+
   return {
     type: 'run.created',
     eventId: `local:${runId}:${receivedAt}`,

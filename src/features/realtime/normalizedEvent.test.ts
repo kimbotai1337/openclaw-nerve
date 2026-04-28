@@ -53,6 +53,63 @@ describe('normalized realtime events', () => {
     });
   });
 
+  it('reuses the locally acknowledged run id for runless deltas before an explicit final arrives', () => {
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(200)
+      .mockReturnValueOnce(201);
+
+    const deltaEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 70,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'FINAL' }] },
+      },
+    };
+
+    const finalEvent: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 71,
+      payload: {
+        sessionKey: 'agent:main:main',
+        runId: 'run-live',
+        state: 'final',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'FINAL_DUP_CHECK_1' }], createdAt: 200 },
+      },
+    };
+
+    const localRunCreated = normalizeLocalRunCreated('agent:main:main', 'run-live', 199);
+    const normalizedDelta = normalizeGatewayEvent(deltaEvent);
+    expect(normalizedDelta).toMatchObject([
+      {
+        type: 'run.status_changed',
+        runId: 'run-live',
+      },
+      {
+        type: 'message.delta_applied',
+        runId: 'run-live',
+        messageId: 'run-live:assistant',
+        text: 'FINAL',
+      },
+    ]);
+
+    const state = apply([
+      localRunCreated,
+      ...normalizedDelta,
+      ...normalizeGatewayEvent(finalEvent),
+    ]);
+
+    expect(Object.keys(state.messages)).toEqual(['run-live:assistant']);
+    expect(state.messages['run-live:assistant']).toMatchObject({
+      runId: 'run-live',
+      contentParts: [{ type: 'text', text: 'FINAL_DUP_CHECK_1' }],
+      status: 'committed',
+    });
+  });
+
   it('uses frameSeq as message revision when chat seq is missing', () => {
     vi.spyOn(Date, 'now').mockReturnValue(140);
 
