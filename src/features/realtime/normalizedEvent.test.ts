@@ -6,6 +6,7 @@ import {
   normalizeGatewayEvent,
   normalizeLocalRunCreated,
   normalizeSnapshotLoaded,
+  resetRealtimeNormalizationStateForTests,
 } from './normalizedEvent';
 
 function apply(events: RealtimeEvent[]) {
@@ -14,6 +15,7 @@ function apply(events: RealtimeEvent[]) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetRealtimeNormalizationStateForTests();
 });
 
 describe('normalized realtime events', () => {
@@ -117,7 +119,7 @@ describe('normalized realtime events', () => {
       .toBeGreaterThan((first[1] as Extract<RealtimeEvent, { type: 'message.delta_applied' }>).revision);
   });
 
-  it('normalizes runId-less chat streams into a deterministic session-scoped fallback run', () => {
+  it('normalizes a runId-less chat stream into a deterministic turn-scoped fallback run', () => {
     vi.spyOn(Date, 'now').mockReturnValue(142);
 
     const deltaEvent: GatewayEvent = {
@@ -145,22 +147,22 @@ describe('normalized realtime events', () => {
     expect(normalizeGatewayEvent(deltaEvent)).toEqual([
       {
         type: 'run.status_changed',
-        eventId: 'chat:142:run-fallback:agent:main:main:delta',
+        eventId: 'chat:142:run-fallback:agent:main:main:1:delta',
         receivedAt: 142,
         source: 'live-chat',
         sessionId: 'agent:main:main',
-        runId: 'run-fallback:agent:main:main',
+        runId: 'run-fallback:agent:main:main:1',
         status: 'running',
         finalized: false,
       },
       {
         type: 'message.delta_applied',
-        eventId: 'chat:142:run-fallback:agent:main:main:message',
+        eventId: 'chat:142:run-fallback:agent:main:main:1:message',
         receivedAt: 142,
         source: 'live-chat',
         sessionId: 'agent:main:main',
-        runId: 'run-fallback:agent:main:main',
-        messageId: 'run-fallback:agent:main:main:assistant',
+        runId: 'run-fallback:agent:main:main:1',
+        messageId: 'run-fallback:agent:main:main:1:assistant',
         text: 'partial',
         revision: 52,
       },
@@ -169,24 +171,24 @@ describe('normalized realtime events', () => {
     expect(normalizeGatewayEvent(finalEvent)).toEqual([
       {
         type: 'run.status_changed',
-        eventId: 'chat:142:run-fallback:agent:main:main:final',
+        eventId: 'chat:142:run-fallback:agent:main:main:1:final',
         receivedAt: 142,
         source: 'live-chat',
         sessionId: 'agent:main:main',
-        runId: 'run-fallback:agent:main:main',
+        runId: 'run-fallback:agent:main:main:1',
         status: 'completed',
         finalized: true,
       },
       {
         type: 'message.committed',
-        eventId: 'chat:142:run-fallback:agent:main:main:committed',
+        eventId: 'chat:142:run-fallback:agent:main:main:1:committed',
         receivedAt: 142,
         source: 'live-chat',
         sessionId: 'agent:main:main',
         message: {
-          messageId: 'run-fallback:agent:main:main:assistant',
+          messageId: 'run-fallback:agent:main:main:1:assistant',
           sessionId: 'agent:main:main',
-          runId: 'run-fallback:agent:main:main',
+          runId: 'run-fallback:agent:main:main:1',
           role: 'assistant',
           contentParts: [{ type: 'text', text: 'done' }],
           status: 'committed',
@@ -195,6 +197,78 @@ describe('normalized realtime events', () => {
         },
       },
     ]);
+  });
+
+  it('keeps consecutive runId-less turns isolated instead of reusing one fallback run', () => {
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(200)
+      .mockReturnValueOnce(201)
+      .mockReturnValueOnce(202)
+      .mockReturnValueOnce(203);
+
+    const events: GatewayEvent[] = [
+      {
+        type: 'event',
+        event: 'chat',
+        seq: 60,
+        payload: {
+          sessionKey: 'agent:main:main',
+          state: 'delta',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'first partial' }] },
+        },
+      },
+      {
+        type: 'event',
+        event: 'chat',
+        seq: 61,
+        payload: {
+          sessionKey: 'agent:main:main',
+          state: 'final',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'first final' }], createdAt: 199 },
+        },
+      },
+      {
+        type: 'event',
+        event: 'chat',
+        seq: 62,
+        payload: {
+          sessionKey: 'agent:main:main',
+          state: 'delta',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'second partial' }] },
+        },
+      },
+      {
+        type: 'event',
+        event: 'chat',
+        seq: 63,
+        payload: {
+          sessionKey: 'agent:main:main',
+          state: 'final',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'second final' }], createdAt: 202 },
+        },
+      },
+    ];
+
+    const state = apply(events.flatMap((event) => normalizeGatewayEvent(event)));
+
+    expect(Object.keys(state.runs)).toEqual([
+      'run-fallback:agent:main:main:1',
+      'run-fallback:agent:main:main:2',
+    ]);
+    expect(Object.keys(state.messages)).toEqual([
+      'run-fallback:agent:main:main:1:assistant',
+      'run-fallback:agent:main:main:2:assistant',
+    ]);
+    expect(state.messages['run-fallback:agent:main:main:1:assistant']).toMatchObject({
+      runId: 'run-fallback:agent:main:main:1',
+      contentParts: [{ type: 'text', text: 'first final' }],
+      status: 'committed',
+    });
+    expect(state.messages['run-fallback:agent:main:main:2:assistant']).toMatchObject({
+      runId: 'run-fallback:agent:main:main:2',
+      contentParts: [{ type: 'text', text: 'second final' }],
+      status: 'committed',
+    });
   });
 
   it('maps an agent lifecycle event into presence update when a phase exists', () => {
