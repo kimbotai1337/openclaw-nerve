@@ -59,8 +59,8 @@ import { renderMarkdown, renderToolResults } from '@/utils/helpers';
 
 import {
   useChatMessages,
-  isLikelyDuplicateMessage,
   mergeFinalMessages,
+  mergeRealtimeProjectedMessages,
   normalizeComparableText,
   patchThinkingDuration,
 } from '@/hooks/useChatMessages';
@@ -221,18 +221,6 @@ function mapRealtimeMessageToChatMsg(
     isSystemNotification: metadataSource.isSystemNotification,
     systemLabel: metadataSource.systemLabel,
   };
-}
-
-function shouldPreserveOverlayMessage(message: ChatMsg, realtimeMessages: ChatMsg[]): boolean {
-  if (message.pending || message.failed) return true;
-  if (message.role === 'tool' || message.role === 'toolResult' || message.role === 'event') return true;
-  if (message.toolGroup || message.intermediate || message.isThinking) return true;
-
-  if (message.role === 'user' || message.role === 'system') {
-    return !realtimeMessages.some((candidate) => isLikelyDuplicateMessage(candidate, message));
-  }
-
-  return false;
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
@@ -453,10 +441,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const durableMessages = visibleRealtimeMessages.map((message) =>
       mapRealtimeMessageToChatMsg(message, existingMessages, claimedHistorySourceIndices),
     );
-    const overlayMessages = existingMessages.filter((message) =>
-      shouldPreserveOverlayMessage(message, durableMessages),
-    );
-    const mergedMessages = mergeFinalMessages(durableMessages, overlayMessages);
+    const mergedMessages = mergeRealtimeProjectedMessages(existingMessages, durableMessages);
 
     applyMessageWindow(mergedMessages, false);
   }, [

@@ -88,6 +88,50 @@ export function patchThinkingDuration(messages: ChatMsg[], durationMs: number): 
   return messages;
 }
 
+function findRealtimeProjectionMatch(
+  existingMessages: ChatMsg[],
+  incomingMessage: ChatMsg,
+  claimedIndices: Set<number>,
+): number {
+  if (incomingMessage.msgId) {
+    const exactIndex = existingMessages.findIndex((message, index) =>
+      !claimedIndices.has(index) && message.msgId === incomingMessage.msgId,
+    );
+    if (exactIndex >= 0) return exactIndex;
+  }
+
+  return existingMessages.findIndex((message, index) =>
+    !claimedIndices.has(index) && isLikelyDuplicateMessage(message, incomingMessage),
+  );
+}
+
+export function mergeRealtimeProjectedMessages(existingMessages: ChatMsg[], durableMessages: ChatMsg[]): ChatMsg[] {
+  if (durableMessages.length === 0) return existingMessages;
+  if (existingMessages.length === 0) {
+    return durableMessages.map((message) => (message.msgId ? message : { ...message, msgId: generateMsgId() }));
+  }
+
+  const claimedIndices = new Set<number>();
+  const replacements = new Map<number, ChatMsg>();
+  const appendedMessages: ChatMsg[] = [];
+
+  for (const durableMessage of durableMessages) {
+    const matchedIndex = findRealtimeProjectionMatch(existingMessages, durableMessage, claimedIndices);
+    if (matchedIndex >= 0) {
+      claimedIndices.add(matchedIndex);
+      replacements.set(matchedIndex, durableMessage);
+      continue;
+    }
+
+    appendedMessages.push(durableMessage.msgId ? durableMessage : { ...durableMessage, msgId: generateMsgId() });
+  }
+
+  return [
+    ...existingMessages.map((message, index) => replacements.get(index) ?? message),
+    ...appendedMessages,
+  ];
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────────
 
 interface UseChatMessagesDeps {

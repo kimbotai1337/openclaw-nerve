@@ -136,6 +136,22 @@ function toCommittedMessage(
   };
 }
 
+function buildPresenceEvent(sessionId: string, receivedAt: number, phase: string): RealtimeEvent {
+  return {
+    type: 'agent.presence_updated',
+    eventId: `presence:${receivedAt}:${sessionId}:${phase}`,
+    receivedAt,
+    source: 'live-chat',
+    sessionId,
+    presence: {
+      sessionId,
+      agentId: sessionId.split(':')[1] || null,
+      phase,
+      lastSeenAt: receivedAt,
+    },
+  };
+}
+
 function deriveAgentPhase(event: ReturnType<typeof classifyStreamEvent>): string | null {
   if (!event || event.source !== 'agent') return null;
 
@@ -249,13 +265,14 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
       status: 'completed',
       finalized: true,
     };
+    const presenceEvent = buildPresenceEvent(sessionId, receivedAt, 'completed');
 
     if (
       !finalMessage ||
       finalMessage.message.role !== 'assistant' ||
       (finalMessage.text.trim().length === 0 && finalMessage.charts.length === 0)
     ) {
-      return [runStatusEvent];
+      return [runStatusEvent, presenceEvent];
     }
 
     return [
@@ -276,6 +293,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
           resolveCommittedCreatedAt(finalMessage.message, receivedAt),
         ),
       },
+      presenceEvent,
     ];
   }
 
@@ -293,6 +311,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
         status: 'failed',
         finalized: true,
       },
+      buildPresenceEvent(sessionId, receivedAt, 'error'),
     ];
   }
 
@@ -310,6 +329,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): RealtimeEvent[] {
         status: 'interrupted',
         finalized: true,
       },
+      buildPresenceEvent(sessionId, receivedAt, 'cancelled'),
     ];
   }
 

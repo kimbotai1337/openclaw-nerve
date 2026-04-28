@@ -196,6 +196,19 @@ describe('normalized realtime events', () => {
           createdAt: 141,
         },
       },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:142:agent:main:main:completed',
+        receivedAt: 142,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'completed',
+          lastSeenAt: 142,
+        },
+      },
     ]);
   });
 
@@ -495,6 +508,19 @@ describe('normalized realtime events', () => {
           createdAt: 150,
         },
       },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:220:agent:main:main:completed',
+        receivedAt: 220,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'completed',
+          lastSeenAt: 220,
+        },
+      },
     ]);
   });
 
@@ -554,6 +580,19 @@ describe('normalized realtime events', () => {
           status: 'committed',
           revision: 13,
           createdAt: 170,
+        },
+      },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:221:agent:main:main:completed',
+        receivedAt: 221,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'completed',
+          lastSeenAt: 221,
         },
       },
     ]);
@@ -617,6 +656,19 @@ describe('normalized realtime events', () => {
           status: 'committed',
           revision: 14,
           createdAt: 171,
+        },
+      },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:222:agent:main:main:completed',
+        receivedAt: 222,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'completed',
+          lastSeenAt: 222,
         },
       },
     ]);
@@ -724,6 +776,19 @@ describe('normalized realtime events', () => {
         status: 'completed',
         finalized: true,
       },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:280:agent:main:main:completed',
+        receivedAt: 280,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'completed',
+          lastSeenAt: 280,
+        },
+      },
     ]);
   });
 
@@ -753,6 +818,19 @@ describe('normalized realtime events', () => {
         status: 'failed',
         finalized: true,
       },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:310:agent:main:main:error',
+        receivedAt: 310,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'error',
+          lastSeenAt: 310,
+        },
+      },
     ]);
   });
 
@@ -781,6 +859,19 @@ describe('normalized realtime events', () => {
         runId: 'run-stop',
         status: 'interrupted',
         finalized: true,
+      },
+      {
+        type: 'agent.presence_updated',
+        eventId: 'presence:311:agent:main:main:cancelled',
+        receivedAt: 311,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        presence: {
+          sessionId: 'agent:main:main',
+          agentId: 'main',
+          phase: 'cancelled',
+          lastSeenAt: 311,
+        },
       },
     ]);
   });
