@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, act, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import type { ChatMsg, ImageAttachment } from '@/features/chat/types';
+import type { GatewayEvent } from '@/types';
 
 describe('ChatContext subscription stability', () => {
   beforeEach(() => {
@@ -335,6 +336,66 @@ describe('ChatContext subscription stability', () => {
       runId: 'run-1',
       source: 'local',
     }));
+  });
+
+  it('renders the final assistant bubble when chat.final carries tool transcript messages plus a separate final answer', async () => {
+    let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+    const { ChatProvider, useChat, subscribeMock } = await setup();
+
+    subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+      onGatewayEvent = listener;
+      return () => {};
+    });
+
+    let messages: ChatMsg[] = [];
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+      }, [chat.messages]);
+      return null;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(onGatewayEvent).not.toBeNull());
+
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'run-1',
+          state: 'final',
+          messages: [
+            {
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: 'Checking files first.' },
+                { type: 'tool_use', name: 'read', input: { path: 'src/file.ts' } },
+              ],
+            },
+          ],
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Here is the final assistant answer.' }],
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(messages.some(
+        (message) => message.role === 'assistant' && message.rawText === 'Here is the final assistant answer.',
+      )).toBe(true);
+    });
   });
 
   it('does not blind-poll chat history for active subagent sessions', async () => {

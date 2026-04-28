@@ -233,6 +233,53 @@ describe('extractFinalMessages', () => {
   it('returns empty array when no content', () => {
     expect(extractFinalMessages({ state: 'final' })).toHaveLength(0);
   });
+
+  it('appends payload.message when messages array has no assistant text', () => {
+    const result = extractFinalMessages({
+      state: 'final',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Need to inspect files first.' },
+            { type: 'tool_use', name: 'read', input: { path: 'src/file.ts' } },
+          ],
+        },
+      ],
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Final answer shown to the user.' }],
+      },
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Final answer shown to the user.' }],
+    });
+  });
+
+  it('appends payload.content when messages array has no assistant text', () => {
+    const result = extractFinalMessages({
+      state: 'final',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Checking results.' },
+            { type: 'tool_use', name: 'grep', input: { pattern: 'foo' } },
+          ],
+        },
+      ],
+      content: [{ type: 'text', text: 'Rendered final content block.' }],
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Rendered final content block.' }],
+    });
+  });
 });
 
 describe('extractFinalMessage', () => {
@@ -265,6 +312,28 @@ describe('extractFinalMessage', () => {
     expect(result!.ttsText).toBe('Spoken summary');
     expect(result!.charts).toHaveLength(1);
     expect(result!.charts[0]?.type).toBe('bar');
+  });
+
+  it('prefers the appended final assistant text over tool-only transcript messages', () => {
+    const result = extractFinalMessage({
+      state: 'final',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Let me inspect that.' },
+            { type: 'tool_use', name: 'read', input: { path: 'src/file.ts' } },
+          ],
+        },
+      ],
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'This is the final assistant response.' }],
+      },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe('This is the final assistant response.');
   });
 });
 

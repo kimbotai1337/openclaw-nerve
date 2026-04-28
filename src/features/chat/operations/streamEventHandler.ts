@@ -182,24 +182,78 @@ function createSyntheticAssistantMessage(content: string | ContentBlock[]): Chat
   };
 }
 
+function normalizeFinalMessageCandidate(message: ChatMessage | string | undefined): ChatMessage | null {
+  if (!message) return null;
+  if (typeof message === 'string') {
+    return createSyntheticAssistantMessage(message);
+  }
+  return message;
+}
+
+function extractAssistantTextContent(message: ChatMessage): string | null {
+  if (message.role !== 'assistant') return null;
+
+  if (typeof message.content === 'string') {
+    const normalized = message.content.trim();
+    return normalized || null;
+  }
+
+  if (Array.isArray(message.content)) {
+    const normalized = message.content
+      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text?.trim() || '')
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    return normalized || null;
+  }
+
+  const normalized = message.text?.trim() || '';
+  return normalized || null;
+}
+
+function appendUniqueAssistantTextMessages(
+  messages: ChatMessage[],
+  candidates: Array<ChatMessage | null>,
+): ChatMessage[] {
+  const result = [...messages];
+  const seenAssistantText = new Set(
+    result
+      .map(extractAssistantTextContent)
+      .filter((text): text is string => Boolean(text)),
+  );
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const assistantText = extractAssistantTextContent(candidate);
+    if (!assistantText || seenAssistantText.has(assistantText)) continue;
+    result.push(candidate);
+    seenAssistantText.add(assistantText);
+  }
+
+  return result;
+}
+
 /**
  * Extract all final messages from a chat 'final' event.
  * Supports payload.messages[], payload.message, and payload.content.
  */
 export function extractFinalMessages(chatPayload: ChatEventPayload): ChatMessage[] {
+  const messageCandidate = normalizeFinalMessageCandidate(chatPayload.message);
+  const contentCandidate = Array.isArray(chatPayload.content) && chatPayload.content.length > 0
+    ? createSyntheticAssistantMessage(chatPayload.content)
+    : null;
+
   if (Array.isArray(chatPayload.messages) && chatPayload.messages.length > 0) {
-    return chatPayload.messages;
+    return appendUniqueAssistantTextMessages(chatPayload.messages, [messageCandidate, contentCandidate]);
   }
 
-  if (chatPayload.message) {
-    if (typeof chatPayload.message === 'string') {
-      return [createSyntheticAssistantMessage(chatPayload.message)];
-    }
-    return [chatPayload.message];
+  if (messageCandidate) {
+    return [messageCandidate];
   }
 
-  if (Array.isArray(chatPayload.content) && chatPayload.content.length > 0) {
-    return [createSyntheticAssistantMessage(chatPayload.content)];
+  if (contentCandidate) {
+    return [contentCandidate];
   }
 
   return [];
