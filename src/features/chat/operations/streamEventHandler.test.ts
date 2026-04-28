@@ -11,6 +11,7 @@ import {
   appendActivityEntry,
   deriveProcessingStage,
 } from './streamEventHandler';
+import { processChatMessages } from './loadHistory';
 import type { GatewayEvent } from '@/types';
 
 describe('isActiveAgentState', () => {
@@ -279,6 +280,30 @@ describe('extractFinalMessages', () => {
       role: 'assistant',
       content: [{ type: 'text', text: 'Rendered final content block.' }],
     });
+  });
+
+  it('strips redundant assistant prefix text while preserving tool transcript blocks', () => {
+    const processed = processChatMessages(extractFinalMessages({
+      state: 'final',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'exec', input: { cmd: 'pwd' } },
+            { type: 'text', text: 'FINAL' },
+          ],
+        },
+      ],
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'FINAL_BUBBLE_OK' }],
+      },
+    }));
+
+    expect(processed.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+      'FINAL_BUBBLE_OK',
+    ]);
+    expect(processed.some((message) => message.role === 'tool')).toBe(true);
   });
 });
 

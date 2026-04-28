@@ -212,6 +212,65 @@ function extractAssistantTextContent(message: ChatMessage): string | null {
   return normalized || null;
 }
 
+function normalizeAssistantText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+function hasLaterAssistantTextSuperset(
+  messages: ChatMessage[],
+  startIndex: number,
+  assistantText: string,
+): boolean {
+  const normalizedCurrent = normalizeAssistantText(assistantText);
+  if (!normalizedCurrent) return false;
+
+  for (let index = startIndex + 1; index < messages.length; index += 1) {
+    const laterAssistantText = extractAssistantTextContent(messages[index]);
+    if (!laterAssistantText) continue;
+
+    const normalizedLater = normalizeAssistantText(laterAssistantText);
+    if (normalizedLater.length > normalizedCurrent.length && normalizedLater.startsWith(normalizedCurrent)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function stripAssistantTextFromMessage(message: ChatMessage): ChatMessage | null {
+  if (message.role !== 'assistant') return message;
+
+  if (typeof message.content === 'string') {
+    return null;
+  }
+
+  if (Array.isArray(message.content)) {
+    const nonTextContent = message.content.filter((block) => block.type !== 'text');
+    if (nonTextContent.length === 0) return null;
+    return {
+      ...message,
+      content: nonTextContent,
+    };
+  }
+
+  if (typeof message.text === 'string' && message.text.trim().length > 0) {
+    return null;
+  }
+
+  return message;
+}
+
+function pruneRedundantAssistantPrefixMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.flatMap((message, index) => {
+    const assistantText = extractAssistantTextContent(message);
+    if (!assistantText) return [message];
+    if (!hasLaterAssistantTextSuperset(messages, index, assistantText)) return [message];
+
+    const strippedMessage = stripAssistantTextFromMessage(message);
+    return strippedMessage ? [strippedMessage] : [];
+  });
+}
+
 function appendUniqueAssistantTextMessages(
   messages: ChatMessage[],
   candidates: Array<ChatMessage | null>,
@@ -245,7 +304,9 @@ export function extractFinalMessages(chatPayload: ChatEventPayload): ChatMessage
     : null;
 
   if (Array.isArray(chatPayload.messages) && chatPayload.messages.length > 0) {
-    return appendUniqueAssistantTextMessages(chatPayload.messages, [messageCandidate, contentCandidate]);
+    return pruneRedundantAssistantPrefixMessages(
+      appendUniqueAssistantTextMessages(chatPayload.messages, [messageCandidate, contentCandidate]),
+    );
   }
 
   if (messageCandidate) {
