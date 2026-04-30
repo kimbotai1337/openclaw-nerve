@@ -44,15 +44,21 @@ function getLatestRunForSession(
   sessionKey: string,
 ) {
   let latestRun: (typeof runs)[string] | null = null;
+  let latestActiveRun: (typeof runs)[string] | null = null;
 
   for (const run of Object.values(runs)) {
     if (run.sessionId !== sessionKey) continue;
+    if (!run.finalized && ACTIVE_RUN_STATUSES.has(run.status)) {
+      if (!latestActiveRun || run.lastEventAt > latestActiveRun.lastEventAt) {
+        latestActiveRun = run;
+      }
+    }
     if (!latestRun || run.lastEventAt > latestRun.lastEventAt) {
       latestRun = run;
     }
   }
 
-  return latestRun;
+  return latestActiveRun ?? latestRun;
 }
 
 function hasStreamingMessageForRun(
@@ -399,12 +405,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const setGranularStatus = useCallback((sessionKey: string, state: GranularAgentState) => {
     if (!sessionKey) return;
     const existing = agentStatusRef.current[sessionKey];
-    if (
+    const sameVisibleState = Boolean(
       existing
       && existing.status === state.status
       && existing.toolName === state.toolName
       && existing.toolDescription === state.toolDescription
-    ) {
+    );
+    if (sameVisibleState && (state.status !== 'DONE' || existing?.since === state.since)) {
       return;
     }
     // Cancel any pending DONE→IDLE timeout for this session
@@ -436,6 +443,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         && existingState.status === state.status
         && existingState.toolName === state.toolName
         && existingState.toolDescription === state.toolDescription
+        && existingState.since === state.since
       ) return prev;
       return { ...prev, [sessionKey]: state };
     });

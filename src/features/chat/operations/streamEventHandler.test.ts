@@ -333,6 +333,28 @@ describe('extractFinalMessages', () => {
     ]);
   });
 
+  it('preserves distinct assistant turns when a later answer merely extends the same prefix', () => {
+    const finalMessages = extractFinalMessages({
+      state: 'final',
+      messages: [
+        { role: 'assistant', content: 'Sure' },
+        { role: 'assistant', content: "Sure, here's the full answer." },
+      ],
+    });
+
+    expect(finalMessages.map((message) => message.content)).toEqual([
+      'Sure',
+      "Sure, here's the full answer.",
+    ]);
+
+    const processed = processChatMessages(finalMessages);
+
+    expect(processed.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+      'Sure',
+      "Sure, here's the full answer.",
+    ]);
+  });
+
   it('strips duplicate assistant finals while preserving tool transcript blocks', () => {
     const processed = processChatMessages(extractFinalMessages({
       state: 'final',

@@ -580,6 +580,9 @@ export default function App({ onLogout }: AppProps) {
 
   const contextTokens = currentSessionData?.totalTokens ?? 0;
   const contextLimit = currentSessionData?.contextTokens || getContextLimit(model);
+  const displayRealtimeStatus = realtimeStatus === 'syncing' && isGenerating
+    ? 'live'
+    : realtimeStatus;
 
   const getWorkspaceSwitchLabel = useCallback((sessionKey: string) => {
     const targetSession = sessions.find((session) => getSessionKey(session) === sessionKey);
@@ -1117,7 +1120,7 @@ export default function App({ onLogout }: AppProps) {
       <div className="boot-panel" style={{ transitionDelay: '200ms' }}>
         <StatusBar
           connectionState={connectionState}
-          realtimeStatus={realtimeStatus}
+          realtimeStatus={displayRealtimeStatus}
           sessionCount={sessions.length}
           sparkline={sparkline}
           contextTokens={contextTokens}

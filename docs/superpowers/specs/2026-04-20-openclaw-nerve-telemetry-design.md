@@ -2,7 +2,7 @@
 
 ## Summary
 
-OpenClaw Nerve needs product visibility without violating the trust expectations of a self-hosted open source UI. This design adds a staged telemetry system with three server-controlled modes: `off`, `minimal`, and `detailed`.
+OpenClaw Nerve needs product visibility without violating the trust expectations of a self-hosted open-source UI. This design adds a staged telemetry system with three server-controlled modes: `off`, `minimal`, and `detailed`.
 
 The rollout is intentionally phased. Phase 1 provides anonymous instance heartbeat data plus aggressively scrubbed server-side error reporting to `telemetry.nerve.zone`. Phase 2 adds explicit opt-in, instance-level product analytics routed through Nerve and sent to `analytics.nerve.zone`.
 
@@ -121,10 +121,15 @@ Every install has one stable anonymous `instance_id`.
 Requirements:
 
 - generated once on first run if missing
-- persisted locally
+- persisted in install-scoped server storage on the device, not browser `sessionStorage`, tab state, or other transient client storage
 - survives upgrades
 - resets on reinstall or explicit local reset
 - never derived from hostname, IP, username, or machine serial
+- legacy transient IDs must not be reused as telemetry `instance_id`; if such IDs exist, Nerve must generate and persist a new install-scoped ID and reconcile future telemetry through that server-owned identity
+
+Migration note:
+
+- implementations that previously created tab-scoped or browser-session IDs must detect those IDs as non-authoritative, discard them for telemetry identity, create the install-scoped server-persistent `instance_id`, and keep the server value as the only telemetry identity source
 
 ### Install Method
 
@@ -493,7 +498,7 @@ Telemetry mode is controlled only from server config. The UI does not own the so
 Fresh installs that start in `minimal` mode show a first-run informational notice that:
 
 - states telemetry is enabled in minimal mode
-- explains what is collected at a high level
+- gives a high-level summary of what is collected
 - links to the public telemetry document
 - explains how to disable telemetry through server config
 
@@ -596,7 +601,7 @@ Required integration coverage:
 
 - `off` mode sends nothing
 - `minimal` sends heartbeat and scrubbed server errors only
-- `detailed` adds only the approved detailed events
+- `detailed` adds the approved detailed events
 - duplicate heartbeats are handled correctly
 - transport failures do not block product behavior
 - browser-originated Phase 2 events are relayed through Nerve instead of sent directly out of the browser

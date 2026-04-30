@@ -378,6 +378,8 @@ export const MessageBubble = memo(MessageBubbleInner, (prev, next) => {
   if (prev.msg.pending !== next.msg.pending) return false;
   if (prev.msg.failed !== next.msg.failed) return false;
   if (prev.msg.streaming !== next.msg.streaming) return false;
+  if (prev.msg.timestamp.getTime() !== next.msg.timestamp.getTime()) return false;
+  if ((prev.firstMessageTime?.getTime() ?? null) !== (next.firstMessageTime?.getTime() ?? null)) return false;
   
   // Collapse states
   if (prev.isCollapsed !== next.isCollapsed) return false;

@@ -160,6 +160,42 @@ function isDurableAssistantHistoryMessage(message: ChatMsg): boolean {
   return true;
 }
 
+function isFinalAssistantAnswerMessage(message: ChatMsg): boolean {
+  if (!isDurableAssistantHistoryMessage(message)) return false;
+  return (
+    message.rawText.trim().length > 0
+    || Boolean(message.images?.length)
+    || Boolean(message.extractedImages?.length)
+    || Boolean(message.charts?.length)
+  );
+}
+
+function isTerminalEventForVisibleTurn(
+  activeRunId: string | null,
+  eventRunId: string,
+  activeRunLastChatSeq: number | null,
+  eventChatSeq: number | undefined,
+  isGenerating: boolean,
+): boolean {
+  if (activeRunId === null) return isGenerating;
+  if (activeRunId === eventRunId) return true;
+
+  // Tool transcript/final frames can arrive under a backend run id that differs
+  // from the send acknowledgement. The active run ref is the stable signal here:
+  // React's generating state can lag when frames are delivered in one batch.
+  // Treat them as current unless sequencing says the frame is older than the
+  // active run.
+  if (
+    typeof eventChatSeq === 'number'
+    && activeRunLastChatSeq !== null
+    && eventChatSeq < activeRunLastChatSeq
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function shouldDeferRealtimeProjection(
   existingMessages: ChatMsg[],
   visibleRealtimeMessages: RealtimeMessageEntity[],
@@ -193,25 +229,41 @@ function mapRealtimeMessageToChatMsg(
   message: RealtimeMessageEntity,
   existingMessages: ChatMsg[],
   claimedSourceIndices: Set<number>,
+  claimedMessageIds: Set<string>,
 ): ChatMsg {
   const comparableMessage = buildComparableRealtimeChatMsg(message);
   const rawText = comparableMessage.rawText;
   const baseMessage: ChatMsg = {
     ...comparableMessage,
     html: rawText.length > 0 ? renderToolResults(renderMarkdown(rawText)) : '',
-    streaming: false,
+    streaming: message.status === 'streaming',
     charts: message.charts,
     uploadAttachments: message.uploadAttachments,
   };
+  const baseMsgId = message.messageId;
   const metadataMatch = findHistoryMetadataSource(existingMessages, baseMessage, claimedSourceIndices);
-  if (!metadataMatch) return baseMessage;
+  if (!metadataMatch) {
+    claimedMessageIds.add(baseMsgId);
+    return { ...baseMessage, msgId: baseMsgId };
+  }
 
   claimedSourceIndices.add(metadataMatch.index);
   const metadataSource = metadataMatch.message;
+  const preferredMsgId = metadataSource.msgId ?? baseMsgId;
+  let msgId = preferredMsgId;
+  if (claimedMessageIds.has(msgId)) {
+    msgId = baseMsgId;
+  }
+  if (claimedMessageIds.has(msgId)) {
+    let suffix = 2;
+    while (claimedMessageIds.has(`${baseMsgId}:${suffix}`)) suffix += 1;
+    msgId = `${baseMsgId}:${suffix}`;
+  }
+  claimedMessageIds.add(msgId);
 
   return {
     ...baseMessage,
-    msgId: metadataSource.msgId ?? baseMessage.msgId,
+    msgId,
     collapsed: metadataSource.collapsed,
     charts: baseMessage.charts ?? metadataSource.charts,
     uploadAttachments: baseMessage.uploadAttachments ?? metadataSource.uploadAttachments,
@@ -252,6 +304,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const lastGatewaySeqRef = useRef<number | null>(null);
   const lastChatSeqRef = useRef<number | null>(null);
   const toolResultRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentTurnStartedAtRef = useRef<number | null>(null);
 
   // ─── Compose hooks ────────────────────────────────────────────────────────
   const msgHook = useChatMessages({ rpc, currentSessionRef });
@@ -330,6 +383,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeRunIdRef.current = null;
     lastGatewaySeqRef.current = null;
     lastChatSeqRef.current = null;
+    currentTurnStartedAtRef.current = null;
     lastSessionSnapshotRequestRef.current = null;
     inFlightSessionSnapshotRequestRef.current = null;
     reconnectRecoveryOwnsHistoryRef.current = false;
@@ -438,17 +492,46 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
 
     const claimedHistorySourceIndices = new Set<number>();
+    const claimedMessageIds = new Set<string>();
     const durableMessages = visibleRealtimeMessages.map((message) =>
-      mapRealtimeMessageToChatMsg(message, existingMessages, claimedHistorySourceIndices),
+      mapRealtimeMessageToChatMsg(message, existingMessages, claimedHistorySourceIndices, claimedMessageIds),
     );
     const mergedMessages = mergeRealtimeProjectedMessages(existingMessages, durableMessages);
 
     applyMessageWindow(mergedMessages, false);
+
+    const currentTurnStartedAt = currentTurnStartedAtRef.current;
+    const hasCurrentTurnRealtimeFinal = currentTurnStartedAt !== null
+      && visibleRealtimeMessages.some((message) =>
+        message.role === 'assistant'
+        && message.status === 'committed'
+        && message.contentParts.some((part) => part.text.trim().length > 0)
+        && message.createdAt >= currentTurnStartedAt - 1_000,
+      );
+
+    if (hasCurrentTurnRealtimeFinal && (isGeneratingRef.current || activeRunIdRef.current)) {
+      activeRunIdRef.current = null;
+      currentTurnStartedAtRef.current = null;
+      incrementGeneration();
+      setIsGenerating(false);
+      setIsSendPending(false);
+      setProcessingStage(null);
+      setActivityLog([]);
+      setLastEventTimestamp(0);
+      clearStreamBuffer();
+      resetThinking();
+    }
   }, [
     applyMessageWindow,
+    clearStreamBuffer,
     currentSession,
     getAllMessages,
+    incrementGeneration,
+    resetThinking,
     realtimeState.connection.reconcileNeeded,
+    setActivityLog,
+    setLastEventTimestamp,
+    setProcessingStage,
     visibleRealtimeMessages,
   ]);
 
@@ -534,9 +617,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const ap = classified.agentPayload!;
 
         if (type === 'lifecycle_start') {
+          const startedAt = Date.now();
           setIsGenerating(true);
           setProcessingStage('thinking');
-          setLastEventTimestamp(Date.now());
+          setLastEventTimestamp(startedAt);
+          currentTurnStartedAtRef.current = startedAt;
           return;
         }
 
@@ -555,6 +640,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             triggerRecovery('reconnect');
           }
           activeRunIdRef.current = null;
+          currentTurnStartedAtRef.current = null;
           return;
         }
 
@@ -580,6 +666,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (type === 'agent_tool_result') {
           const completedId = ap.data?.toolCallId;
           if (completedId) completeActivityEntry(completedId);
+          if (isGeneratingRef.current || activeRunIdRef.current || currentTurnStartedAtRef.current) return;
 
           if (toolResultRefreshRef.current) clearTimeout(toolResultRefreshRef.current);
           const capturedSession = currentSessionRef.current;
@@ -611,6 +698,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const activeRunBefore = activeRunIdRef.current;
       const runId = resolveRunId(classified.runId, activeRunBefore)
         ?? createFallbackRunId(currentSessionRef.current);
+      const activeRunLastChatSeq = activeRunBefore
+        ? runsRef.current.get(activeRunBefore)?.lastChatSeq ?? null
+        : null;
 
       const run = getOrCreateRunState(runsRef.current, runId, currentSessionRef.current);
       run.lastFrameSeq = updateHighestSeq(run.lastFrameSeq, classified.frameSeq);
@@ -631,6 +721,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (type === 'chat_started') {
         activeRunIdRef.current = runId;
         run.startedAt = Date.now();
+        currentTurnStartedAtRef.current = run.startedAt;
         run.finalized = false;
         run.status = 'started';
         run.stopReason = undefined;
@@ -665,29 +756,58 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (type === 'chat_final') {
-        const isActiveRun = activeRunBefore !== null
-          ? activeRunBefore === runId
-          : isGeneratingRef.current;
+        const isActiveRun = isTerminalEventForVisibleTurn(
+          activeRunBefore,
+          runId,
+          activeRunLastChatSeq,
+          classified.chatSeq,
+          isGeneratingRef.current,
+        );
 
-        run.finalized = true;
-        run.status = 'ok';
+        const finalData = extractFinalMessage(cp);
+        const finalMessages = processChatMessages(extractFinalMessages(cp));
+        const isStaleForActiveRun = activeRunBefore !== null
+          && typeof classified.chatSeq === 'number'
+          && activeRunLastChatSeq !== null
+          && classified.chatSeq < activeRunLastChatSeq;
+        const isCurrentTurnFrame = isActiveRun
+          || (currentTurnStartedAtRef.current !== null && !isStaleForActiveRun);
+        const hasFinalAssistantAnswer = finalMessages.some(isFinalAssistantAnswerMessage);
+        const transcriptOnlyCurrentFrame = isCurrentTurnFrame
+          && finalMessages.length > 0
+          && !hasFinalAssistantAnswer;
+        const finalCompletesVisibleTurn = !transcriptOnlyCurrentFrame
+          && (isActiveRun || (isCurrentTurnFrame && hasFinalAssistantAnswer));
+
+        if (!transcriptOnlyCurrentFrame) {
+          run.finalized = true;
+          run.status = 'ok';
+        }
         run.stopReason = cp.stopReason;
         run.bufferRaw = '';
         run.bufferText = '';
 
-        if (activeRunIdRef.current === runId) activeRunIdRef.current = null;
+        if (!transcriptOnlyCurrentFrame) {
+          if (activeRunIdRef.current === runId || finalCompletesVisibleTurn) activeRunIdRef.current = null;
+          if (finalCompletesVisibleTurn) {
+            currentTurnStartedAtRef.current = null;
+          }
+        }
         incrementGeneration();
 
-        if (isActiveRun) {
-          setIsGenerating(false);
-          setProcessingStage(null);
-          setActivityLog([]);
-          setLastEventTimestamp(0);
-          clearStreamBuffer();
+        if (isCurrentTurnFrame) {
+          if (transcriptOnlyCurrentFrame) {
+            setProcessingStage('tool_use');
+          } else {
+            setIsGenerating(false);
+            setProcessingStage(null);
+            setActivityLog([]);
+            setLastEventTimestamp(0);
+          }
+          if (!transcriptOnlyCurrentFrame) {
+            clearStreamBuffer();
+          }
         }
-
-        const finalData = extractFinalMessage(cp);
-        const finalMessages = processChatMessages(extractFinalMessages(cp));
 
         if (finalMessages.length > 0) {
           const merged = mergeFinalMessages(getAllMessages(), finalMessages);
@@ -700,16 +820,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           triggerRecovery('unrenderable-final');
         }
 
-        handleFinalTTS(finalData, isActiveRun);
-        resetThinking();
+        if (!transcriptOnlyCurrentFrame) {
+          handleFinalTTS(finalData, finalCompletesVisibleTurn);
+          resetThinking();
+        }
         pruneRunRegistry(runsRef.current, activeRunIdRef.current);
         return;
       }
 
       if (type === 'chat_aborted') {
-        const isActiveRun = activeRunBefore !== null
-          ? activeRunBefore === runId
-          : isGeneratingRef.current;
+        const isActiveRun = isTerminalEventForVisibleTurn(
+          activeRunBefore,
+          runId,
+          activeRunLastChatSeq,
+          classified.chatSeq,
+          isGeneratingRef.current,
+        );
 
         run.finalized = true;
         run.status = undefined;
@@ -717,7 +843,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         run.bufferRaw = '';
         run.bufferText = '';
 
-        if (activeRunIdRef.current === runId) activeRunIdRef.current = null;
+        if (activeRunIdRef.current === runId || isActiveRun) activeRunIdRef.current = null;
+        if (isActiveRun) {
+          currentTurnStartedAtRef.current = null;
+        }
         incrementGeneration();
 
         const partialMessagesRaw = extractFinalMessages(cp);
@@ -744,9 +873,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (type === 'chat_error') {
-        const isActiveRun = activeRunBefore !== null
-          ? activeRunBefore === runId
-          : isGeneratingRef.current;
+        const isActiveRun = isTerminalEventForVisibleTurn(
+          activeRunBefore,
+          runId,
+          activeRunLastChatSeq,
+          classified.chatSeq,
+          isGeneratingRef.current,
+        );
 
         run.finalized = true;
         run.status = undefined;
@@ -754,7 +887,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         run.bufferRaw = '';
         run.bufferText = '';
 
-        if (activeRunIdRef.current === runId) activeRunIdRef.current = null;
+        if (activeRunIdRef.current === runId || isActiveRun) activeRunIdRef.current = null;
+        if (isActiveRun) {
+          currentTurnStartedAtRef.current = null;
+        }
         incrementGeneration();
 
         if (isActiveRun) {
@@ -811,6 +947,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     msgHook.setMessages((prev: ChatMsg[]) => [...prev, userMsg]);
     setIsGenerating(true);
     setIsSendPending(true);
+    currentTurnStartedAtRef.current = Date.now();
     streamHook.setStream((prev: ChatStreamState) => ({ ...prev, html: '', runId: undefined }));
     setProcessingStage('thinking');
 

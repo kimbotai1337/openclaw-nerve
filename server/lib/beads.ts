@@ -196,8 +196,16 @@ function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
   const candidateRealPath = resolveExistingRealPath(normalizedCandidate);
   const rootRealPath = resolveExistingRealPath(normalizedRoot);
 
-  const containmentCandidate = candidateRealPath ?? normalizedCandidate;
+  let containmentCandidate = candidateRealPath ?? normalizedCandidate;
   const containmentRoot = rootRealPath ?? normalizedRoot;
+
+  if (!candidateRealPath && rootRealPath) {
+    const lexicalRelative = path.relative(normalizedRoot, normalizedCandidate);
+    if (lexicalRelative === '' || (!lexicalRelative.startsWith('..') && !path.isAbsolute(lexicalRelative))) {
+      containmentCandidate = path.resolve(rootRealPath, lexicalRelative);
+    }
+  }
+
   const relative = path.relative(containmentRoot, containmentCandidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }

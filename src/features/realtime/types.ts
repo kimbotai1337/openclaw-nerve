@@ -20,6 +20,7 @@ export interface RealtimeConnectionState {
   lastLiveAt: number;
   lastDisconnectReason: string | null;
   reconcileNeeded: boolean;
+  pendingReconcileCount?: number;
   reconnectAttempt: number;
 }
 

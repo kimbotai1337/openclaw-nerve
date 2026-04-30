@@ -21,6 +21,7 @@ function createDeferred<T>() {
 const {
   settingsContext,
   appRealtimeContext,
+  appChatContext,
   uploadConfigState,
   sessionContext,
   saveFileByAgent,
@@ -40,6 +41,9 @@ const {
   };
   const appRealtimeContext = {
     realtimeStatus: 'live' as 'live' | 'reconnecting' | 'syncing' | 'degraded' | 'offline',
+  };
+  const appChatContext = {
+    isGenerating: false,
   };
   const uploadConfigState = {
     fileReferenceEnabled: true,
@@ -116,6 +120,7 @@ const {
   return {
     settingsContext,
     appRealtimeContext,
+    appChatContext,
     uploadConfigState,
     sessionContext,
     saveFileByAgent,
@@ -148,7 +153,7 @@ vi.mock('@/contexts/SessionContext', () => ({
 vi.mock('@/contexts/ChatContext', () => ({
   useChat: () => ({
     messages: [],
-    isGenerating: false,
+    isGenerating: appChatContext.isGenerating,
     stream: null,
     processingStage: null,
     lastEventTimestamp: null,
@@ -671,6 +676,7 @@ describe('App status bar wiring', () => {
   beforeEach(() => {
     localStorage.clear();
     appRealtimeContext.realtimeStatus = 'live';
+    appChatContext.isGenerating = false;
     statusBarRenderSnapshots.length = 0;
   });
 
@@ -680,6 +686,15 @@ describe('App status bar wiring', () => {
     render(<App />);
 
     expect(statusBarRenderSnapshots.at(-1)).toMatchObject({ realtimeStatus: 'syncing' });
+  });
+
+  it('keeps the status bar live during active-generation background sync', () => {
+    appRealtimeContext.realtimeStatus = 'syncing';
+    appChatContext.isGenerating = true;
+
+    render(<App />);
+
+    expect(statusBarRenderSnapshots.at(-1)).toMatchObject({ realtimeStatus: 'live' });
   });
 });
 

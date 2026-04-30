@@ -13,6 +13,7 @@ export function createInitialRealtimeState(): RealtimeState {
       lastLiveAt: 0,
       lastDisconnectReason: null,
       reconcileNeeded: false,
+      pendingReconcileCount: 0,
       reconnectAttempt: 0,
     },
     sessions: {},
@@ -38,6 +39,10 @@ function messageStatusPriority(status: RealtimeMessageEntity['status']) {
   }
 }
 
+function isActiveRunStatus(status: RealtimeRunEntity['status']): boolean {
+  return status === 'queued' || status === 'running';
+}
+
 function upsertMessage(state: RealtimeState, message: RealtimeMessageEntity) {
   const existing = state.messages[message.messageId];
   if (!existing) {
@@ -51,6 +56,55 @@ function upsertMessage(state: RealtimeState, message: RealtimeMessageEntity) {
   }
 
   state.messages[message.messageId] = message;
+}
+
+function finalizeSiblingActiveRuns(
+  state: RealtimeState,
+  sessionId: string,
+  terminalRunId: string,
+  status: RealtimeRunEntity['status'],
+  receivedAt: number,
+) {
+  for (const run of Object.values(state.runs)) {
+    if (run.sessionId !== sessionId) continue;
+    if (run.runId === terminalRunId) continue;
+    if (run.finalized || !isActiveRunStatus(run.status)) continue;
+    if (run.lastEventAt > receivedAt) continue;
+
+    state.runs[run.runId] = {
+      ...run,
+      status,
+      finalized: true,
+      lastEventAt: Math.max(run.lastEventAt, receivedAt),
+    };
+  }
+}
+
+function messageText(message: RealtimeMessageEntity): string {
+  return message.contentParts.map((part) => part.text).join('').trim().replace(/\s+/g, ' ');
+}
+
+function supersedeStreamingAssistantPrefixes(state: RealtimeState, committed: RealtimeMessageEntity) {
+  if (committed.role !== 'assistant' || committed.status !== 'committed') return;
+
+  const finalText = messageText(committed);
+  if (!finalText) return;
+
+  for (const message of Object.values(state.messages)) {
+    if (message.messageId === committed.messageId) continue;
+    if (message.sessionId !== committed.sessionId) continue;
+    if (message.role !== 'assistant' || message.status !== 'streaming') continue;
+
+    const streamingText = messageText(message);
+    if (!streamingText) continue;
+    if (finalText !== streamingText && !finalText.startsWith(streamingText)) continue;
+    if (Math.abs(message.createdAt - committed.createdAt) > 5 * 60_000) continue;
+
+    state.messages[message.messageId] = {
+      ...message,
+      status: 'superseded',
+    };
+  }
 }
 
 function getSessionStateWatermark(state: RealtimeState, sessionId: string) {
@@ -207,6 +261,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       return next;
 
     case 'connection.reconcile_requested':
+      next.connection.pendingReconcileCount = (next.connection.pendingReconcileCount ?? 0) + 1;
       next.connection.reconcileNeeded = true;
       return next;
 
@@ -230,6 +285,9 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
     case 'run.status_changed':
       if (next.runs[event.runId]?.finalized) return next;
       if (!event.finalized && (next.runs[event.runId]?.lastEventAt ?? -Infinity) > event.receivedAt) return next;
+      if (event.finalized) {
+        finalizeSiblingActiveRuns(next, event.sessionId, event.runId, event.status, event.receivedAt);
+      }
 
       upsertRun(next, {
         ...(next.runs[event.runId] ?? {
@@ -261,6 +319,7 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
 
     case 'message.committed':
       upsertMessage(next, event.message);
+      supersedeStreamingAssistantPrefixes(next, event.message);
       ensureRunForCommittedMessage(next, event.message);
       return next;
 
@@ -274,7 +333,11 @@ export function realtimeReducer(state: RealtimeState, event: RealtimeEvent): Rea
       return next;
 
     case 'snapshot.merge_completed':
-      next.connection.reconcileNeeded = false;
+      next.connection.pendingReconcileCount = Math.max(
+        (next.connection.pendingReconcileCount ?? (next.connection.reconcileNeeded ? 1 : 0)) - 1,
+        0,
+      );
+      next.connection.reconcileNeeded = next.connection.pendingReconcileCount > 0;
       return next;
   }
 }

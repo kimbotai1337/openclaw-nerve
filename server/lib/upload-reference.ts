@@ -28,6 +28,11 @@ function isWithinDir(candidate: string, root: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+async function resolveContainmentRoot(root: string): Promise<string> {
+  const resolvedRoot = path.resolve(root);
+  return fs.realpath(resolvedRoot).catch(() => resolvedRoot);
+}
+
 function toCanonicalWorkspacePath(absolutePath: string, workspaceRoot: string): string {
   const relative = path.relative(workspaceRoot, absolutePath);
   return relative.split(path.sep).join('/');
@@ -97,9 +102,10 @@ async function buildCanonicalReference(params: {
   workspaceRoot?: string;
 }): Promise<CanonicalUploadReference> {
   const workspaceRoot = path.resolve(getWorkspaceRoot(params.workspaceRoot));
+  const containmentRoot = await resolveContainmentRoot(workspaceRoot);
   const realAbsolutePath = await fs.realpath(params.absolutePath);
 
-  if (!isWithinDir(realAbsolutePath, workspaceRoot)) {
+  if (!isWithinDir(realAbsolutePath, containmentRoot)) {
     throw new Error('Resolved attachment path is outside the workspace root.');
   }
 
@@ -108,11 +114,14 @@ async function buildCanonicalReference(params: {
     throw new Error('Resolved attachment path is not a file.');
   }
 
+  const canonicalPath = toCanonicalWorkspacePath(realAbsolutePath, containmentRoot);
+  const configuredAbsolutePath = path.join(workspaceRoot, canonicalPath);
+
   return {
     kind: params.kind,
-    canonicalPath: toCanonicalWorkspacePath(realAbsolutePath, workspaceRoot),
-    absolutePath: realAbsolutePath,
-    uri: toFileUri(realAbsolutePath),
+    canonicalPath,
+    absolutePath: configuredAbsolutePath,
+    uri: toFileUri(configuredAbsolutePath),
     mimeType: params.mimeType?.trim() || inferMimeTypeFromName(params.originalName),
     sizeBytes: stat.size,
     originalName: params.originalName,

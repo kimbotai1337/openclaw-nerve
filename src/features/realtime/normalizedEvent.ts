@@ -96,10 +96,14 @@ function resolveRealtimeRunId(
     || event.type === 'chat_aborted';
   const isActiveTurnEvent = event.type === 'chat_started' || event.type === 'chat_delta';
 
-  const resolvedRunId = explicitRunId ?? activeRunId ?? createFallbackRunId(sessionId);
+  const resolvedRunId = explicitRunId
+    ?? (event.type === 'chat_started' ? createFallbackRunId(sessionId) : activeRunId)
+    ?? createFallbackRunId(sessionId);
 
   if (isTerminal) {
-    activeChatRunIdsBySession.delete(sessionId);
+    if (!activeRunId || activeRunId === resolvedRunId) {
+      activeChatRunIdsBySession.delete(sessionId);
+    }
   } else if (isActiveTurnEvent) {
     activeChatRunIdsBySession.set(sessionId, resolvedRunId);
   }

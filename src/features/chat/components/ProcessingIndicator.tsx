@@ -51,6 +51,7 @@ export function ProcessingIndicator({
   const descriptionText =
     currentToolDescription ??
     (stage === 'thinking' ? 'Reasoning...' : null);
+  const showRecoveryStatus = isRecovering && activityLog.length === 0;
 
   return (
     <div className="flex flex-col gap-2 px-4 py-3">
@@ -105,7 +106,7 @@ export function ProcessingIndicator({
       )}
 
       {/* Recovery status */}
-      {isRecovering && (
+      {showRecoveryStatus && (
         <div
           className="text-primary text-[0.733rem]"
           style={{

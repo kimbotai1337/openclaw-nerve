@@ -427,6 +427,54 @@ describe('buildRealtimeSnapshot', () => {
     ]);
   });
 
+  it('uses live agent state over stale idle status when deriving the active snapshot run', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(12_500);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'idle',
+              agentState: 'thinking',
+              updatedAt: 12_400,
+              currentRunId: 'run-live',
+              latestRunId: 'run-live',
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(snapshot.session.status).toBe('thinking');
+    expect(snapshot.runs).toEqual([
+      {
+        runId: 'run-live',
+        sessionId: 'agent:main:main',
+        status: 'running',
+        messageIds: [],
+        lastEventAt: 12_400,
+        finalized: false,
+      },
+    ]);
+    expect(snapshot.agentPresence).toEqual({
+      sessionId: 'agent:main:main',
+      agentId: 'main',
+      phase: 'thinking',
+      lastSeenAt: 12_400,
+    });
+  });
+
   it('keeps a last-run placeholder terminal when the session is idle and history is gone', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(13_000);
 
@@ -757,6 +805,66 @@ describe('buildRealtimeSnapshot', () => {
         role: 'user',
         contentParts: [],
         uploadAttachments: manifestAttachments,
+      }),
+    ]);
+  });
+
+  it('falls back to a wider session lookup before treating the target session as missing', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(16_000);
+
+    gatewayRpcCallMock.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'sessions.list' && params?.activeMinutes === 24 * 60) {
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:other:main',
+              status: 'idle',
+              updatedAt: 15_000,
+            },
+          ],
+        };
+      }
+
+      if (method === 'sessions.list') {
+        expect(params).toEqual({ limit: 1000 });
+        return {
+          sessions: [
+            {
+              sessionKey: 'agent:main:main',
+              status: 'running',
+              updatedAt: 15_900,
+              currentRunId: 'run-wide',
+              busy: true,
+            },
+          ],
+        };
+      }
+
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+
+    const { buildRealtimeSnapshot } = await import('./realtime-snapshot.js');
+    const snapshot = await buildRealtimeSnapshot({ sessionKey: 'agent:main:main', limit: 5 });
+
+    expect(gatewayRpcCallMock).toHaveBeenCalledWith('sessions.list', {
+      activeMinutes: 24 * 60,
+      limit: 200,
+    });
+    expect(gatewayRpcCallMock).toHaveBeenCalledWith('sessions.list', { limit: 1000 });
+    expect(snapshot.session).toMatchObject({
+      sessionId: 'agent:main:main',
+      status: 'running',
+      updatedAt: 15_900,
+    });
+    expect(snapshot.runs).toEqual([
+      expect.objectContaining({
+        runId: 'run-wide',
+        status: 'running',
+        finalized: false,
       }),
     ]);
   });

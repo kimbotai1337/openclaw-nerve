@@ -338,7 +338,7 @@ describe('ChatContext subscription stability', () => {
     }));
   });
 
-  it('renders the final assistant bubble when chat.final carries tool transcript messages plus a separate final answer', async () => {
+  it('renders tool transcript bubbles and the final assistant bubble from chat.final', async () => {
     let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
     const { ChatProvider, useChat, subscribeMock } = await setup();
 
@@ -395,6 +395,846 @@ describe('ChatContext subscription stability', () => {
       expect(messages.some(
         (message) => message.role === 'assistant' && message.rawText === 'Here is the final assistant answer.',
       )).toBe(true);
+    });
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        rawText: 'Checking files first.',
+        isThinking: true,
+      }),
+      expect.objectContaining({
+        role: 'tool',
+        rawText: expect.stringContaining('`read`'),
+      }),
+      expect.objectContaining({
+        role: 'assistant',
+        rawText: 'Here is the final assistant answer.',
+      }),
+    ]);
+  });
+
+  it('replaces a realtime-projected streaming prefix when the final assistant answer arrives', async () => {
+    let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+    const { ChatProvider, useChat, subscribeMock } = await setup({
+      currentSession: 'main',
+      realtimeState: {
+        connection: {
+          status: 'live',
+          lastLiveAt: 0,
+          lastDisconnectReason: null,
+          reconcileNeeded: false,
+          reconnectAttempt: 0,
+        },
+        sessions: { main: { sessionId: 'main', status: 'running', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' } },
+        runs: {
+          'run-1': {
+            runId: 'run-1',
+            sessionId: 'main',
+            status: 'running',
+            messageIds: ['run-1:assistant'],
+            lastEventAt: 1,
+            finalized: false,
+          },
+        },
+        messages: {
+          'run-1:assistant': {
+            messageId: 'run-1:assistant',
+            sessionId: 'main',
+            runId: 'run-1',
+            role: 'assistant',
+            contentParts: [{ type: 'text', text: 'NERVE' }],
+            status: 'streaming',
+            revision: 1,
+            createdAt: 1_000,
+          },
+        },
+        agentPresence: {},
+      },
+    });
+
+    subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+      onGatewayEvent = listener;
+      return () => {};
+    });
+
+    let messages: ChatMsg[] = [];
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+      }, [chat.messages]);
+      return null;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual(['NERVE']);
+    });
+    await waitFor(() => expect(onGatewayEvent).not.toBeNull());
+
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'run-1',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'NERVE_TOOL_SMOKE_OK_20260428_B' }],
+            timestamp: 1_500,
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(messages.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+        'NERVE_TOOL_SMOKE_OK_20260428_B',
+      ]);
+    });
+  });
+
+  it('keeps completed tool results in the live activity feed instead of refreshing transcript bubbles mid-run', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+      const { ChatProvider, subscribeMock, loadChatHistoryMock } = await setup();
+
+      subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+        onGatewayEvent = listener;
+        return () => {};
+      });
+
+      function Consumer() {
+        return null;
+      }
+
+      render(
+        <ChatProvider>
+          <Consumer />
+        </ChatProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onGatewayEvent).not.toBeNull();
+
+      await act(async () => {
+        onGatewayEvent!({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            sessionKey: 'main',
+            runId: 'run-1',
+            state: 'started',
+            seq: 1,
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'agent',
+          payload: {
+            sessionKey: 'main',
+            runId: 'run-1',
+            stream: 'tool',
+            seq: 2,
+            data: {
+              phase: 'result',
+              toolCallId: 'tool-1',
+            },
+          },
+        });
+        vi.advanceTimersByTime(400);
+        await Promise.resolve();
+      });
+
+      expect(loadChatHistoryMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not refresh history for tool results while a lifecycle-only turn is open', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+      const { ChatProvider, subscribeMock, loadChatHistoryMock } = await setup();
+
+      subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+        onGatewayEvent = listener;
+        return () => {};
+      });
+
+      function Consumer() {
+        return null;
+      }
+
+      render(
+        <ChatProvider>
+          <Consumer />
+        </ChatProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onGatewayEvent).not.toBeNull();
+
+      await act(async () => {
+        onGatewayEvent!({
+          type: 'event',
+          event: 'agent',
+          payload: {
+            sessionKey: 'main',
+            stream: 'lifecycle',
+            data: { phase: 'start' },
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'agent',
+          payload: {
+            sessionKey: 'main',
+            stream: 'tool',
+            data: {
+              phase: 'result',
+              toolCallId: 'tool-1',
+            },
+          },
+        });
+        vi.advanceTimersByTime(400);
+        await Promise.resolve();
+      });
+
+      expect(loadChatHistoryMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows late tool results after the assistant final to refresh history', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+      const { ChatProvider, subscribeMock, loadChatHistoryMock } = await setup();
+
+      subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+        onGatewayEvent = listener;
+        return () => {};
+      });
+
+      function Consumer() {
+        return null;
+      }
+
+      render(
+        <ChatProvider>
+          <Consumer />
+        </ChatProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onGatewayEvent).not.toBeNull();
+
+      await act(async () => {
+        onGatewayEvent!({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            sessionKey: 'main',
+            runId: 'run-1',
+            state: 'started',
+            seq: 1,
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            sessionKey: 'main',
+            runId: 'run-1',
+            state: 'final',
+            seq: 2,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'final answer' }],
+              timestamp: 1_000,
+            },
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'agent',
+          payload: {
+            sessionKey: 'main',
+            runId: 'run-1',
+            stream: 'tool',
+            data: {
+              phase: 'result',
+              toolCallId: 'tool-1',
+            },
+          },
+        });
+        vi.advanceTimersByTime(400);
+        await Promise.resolve();
+      });
+
+      expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('renders active-run tool transcript bubbles while keeping the live turn open', async () => {
+    let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+    const { ChatProvider, useChat, subscribeMock } = await setup();
+
+    subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+      onGatewayEvent = listener;
+      return () => {};
+    });
+
+    let messages: ChatMsg[] = [];
+    let activityDescriptions: string[] = [];
+    let isGenerating = false;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+        activityDescriptions = chat.activityLog.map((entry) => entry.description);
+        isGenerating = chat.isGenerating;
+      }, [chat.activityLog, chat.isGenerating, chat.messages]);
+      return null;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(onGatewayEvent).not.toBeNull());
+
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'run-1',
+          state: 'started',
+          seq: 1,
+        },
+      });
+      onGatewayEvent!({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'main',
+          runId: 'run-1',
+          stream: 'tool',
+          seq: 2,
+          data: {
+            phase: 'start',
+            name: 'exec',
+            args: { command: 'pwd' },
+            toolCallId: 'tool-1',
+          },
+        },
+      });
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'run-1',
+          state: 'final',
+          seq: 3,
+          messages: [
+            {
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: 'Need the current directory first.' },
+                { type: 'tool_use', name: 'exec', input: { command: 'pwd' } },
+              ],
+              timestamp: 1_000,
+            },
+          ],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        rawText: 'Need the current directory first.',
+        isThinking: true,
+      }),
+      expect.objectContaining({
+        role: 'tool',
+        rawText: expect.stringContaining('`exec`'),
+      }),
+    ]);
+    expect(activityDescriptions).toEqual(['exec: pwd']);
+    expect(isGenerating).toBe(true);
+  });
+
+  it('renders active-turn tool transcript bubbles when the transcript final uses a different run id', async () => {
+    let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+    const { ChatProvider, useChat, subscribeMock } = await setup();
+
+    subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+      onGatewayEvent = listener;
+      return () => {};
+    });
+
+    let messages: ChatMsg[] = [];
+    let activityDescriptions: string[] = [];
+    let isGenerating = false;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+        activityDescriptions = chat.activityLog.map((entry) => entry.description);
+        isGenerating = chat.isGenerating;
+      }, [chat.activityLog, chat.isGenerating, chat.messages]);
+      return null;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(onGatewayEvent).not.toBeNull());
+
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'send-ack-run',
+          state: 'started',
+          seq: 10,
+        },
+      });
+      onGatewayEvent!({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'main',
+          runId: 'send-ack-run',
+          stream: 'tool',
+          seq: 11,
+          data: {
+            phase: 'start',
+            name: 'exec',
+            args: { command: 'pwd' },
+            toolCallId: 'tool-1',
+          },
+        },
+      });
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'transcript-run',
+          state: 'final',
+          seq: 12,
+          messages: [
+            {
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: 'Need the current directory first.' },
+                { type: 'tool_use', name: 'exec', input: { command: 'pwd' } },
+              ],
+              timestamp: 1_000,
+            },
+          ],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        rawText: 'Need the current directory first.',
+        isThinking: true,
+      }),
+      expect.objectContaining({
+        role: 'tool',
+        rawText: expect.stringContaining('`exec`'),
+      }),
+    ]);
+    expect(activityDescriptions).toEqual(['exec: pwd']);
+    expect(isGenerating).toBe(true);
+  });
+
+  it('renders transcript-only finals without enabling a legacy history refresh before the assistant final', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+      const { ChatProvider, useChat, subscribeMock, loadChatHistoryMock } = await setup({
+        loadChatHistoryImpl: async () => [
+          {
+            msgId: 'history-tool',
+            role: 'tool',
+            html: 'exec: pwd',
+            rawText: '**tool:** `exec`\n```json\n{"command":"pwd"}\n```',
+            timestamp: new Date(1_000),
+          },
+        ],
+      });
+
+      subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+        onGatewayEvent = listener;
+        return () => {};
+      });
+
+      let messages: ChatMsg[] = [];
+      let activityDescriptions: string[] = [];
+      let isGenerating = false;
+
+      function Consumer() {
+        const chat = useChat();
+        useEffect(() => {
+          messages = chat.messages;
+          activityDescriptions = chat.activityLog.map((entry) => entry.description);
+          isGenerating = chat.isGenerating;
+        }, [chat.activityLog, chat.isGenerating, chat.messages]);
+        return null;
+      }
+
+      render(
+        <ChatProvider>
+          <Consumer />
+        </ChatProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onGatewayEvent).not.toBeNull();
+
+      await act(async () => {
+        onGatewayEvent!({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            sessionKey: 'main',
+            runId: 'send-ack-run',
+            state: 'started',
+            seq: 30,
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'agent',
+          payload: {
+            sessionKey: 'main',
+            runId: 'send-ack-run',
+            stream: 'tool',
+            seq: 31,
+            data: {
+              phase: 'start',
+              name: 'exec',
+              args: { command: 'pwd' },
+              toolCallId: 'tool-1',
+            },
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            sessionKey: 'main',
+            runId: 'transcript-run',
+            state: 'final',
+            seq: 31,
+            messages: [
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'thinking', thinking: 'Need the current directory first.' },
+                  { type: 'tool_use', name: 'exec', input: { command: 'pwd' } },
+                ],
+                timestamp: 1_000,
+              },
+            ],
+          },
+        });
+        onGatewayEvent!({
+          type: 'event',
+          event: 'agent',
+          payload: {
+            sessionKey: 'main',
+            runId: 'send-ack-run',
+            stream: 'tool',
+            seq: 32,
+            data: {
+              phase: 'result',
+              toolCallId: 'tool-1',
+            },
+          },
+        });
+        vi.advanceTimersByTime(400);
+        await Promise.resolve();
+      });
+
+      expect(loadChatHistoryMock).not.toHaveBeenCalled();
+      expect(messages).toEqual([
+        expect.objectContaining({
+          role: 'assistant',
+          rawText: 'Need the current directory first.',
+          isThinking: true,
+        }),
+        expect.objectContaining({
+          role: 'tool',
+          rawText: expect.stringContaining('`exec`'),
+        }),
+      ]);
+      expect(activityDescriptions).toEqual(['exec: pwd']);
+      expect(isGenerating).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the streaming bubble when the final answer uses a different run id during generation', async () => {
+    let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+    const { ChatProvider, useChat, subscribeMock } = await setup();
+
+    subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+      onGatewayEvent = listener;
+      return () => {};
+    });
+
+    let messages: ChatMsg[] = [];
+    let streamHtml = '';
+    let isGenerating = false;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+        streamHtml = chat.stream.html;
+        isGenerating = chat.isGenerating;
+      }, [chat.isGenerating, chat.messages, chat.stream.html]);
+      return null;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(onGatewayEvent).not.toBeNull());
+
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'send-ack-run',
+          state: 'started',
+          seq: 20,
+        },
+      });
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'send-ack-run',
+          state: 'delta',
+          seq: 21,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'NERVE_DUPLICATE_PREFIX' }],
+            timestamp: 1_000,
+          },
+        },
+      });
+    });
+
+    await waitFor(() => expect(streamHtml).toContain('NERVE_DUPLICATE_PREFIX'));
+
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'final-answer-run',
+          state: 'final',
+          seq: 22,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'NERVE_DUPLICATE_PREFIX_DONE' }],
+            timestamp: 1_100,
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(streamHtml).toBe('');
+      expect(isGenerating).toBe(false);
+      expect(messages.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+        'NERVE_DUPLICATE_PREFIX_DONE',
+      ]);
+    });
+  });
+
+  it('clears the live stream when realtime projection commits the current turn final answer', async () => {
+    let onGatewayEvent: ((event: GatewayEvent) => void) | null = null;
+    const { ChatProvider, useChat, subscribeMock, realtimeStateRef } = await setup({
+      currentSession: 'main',
+      realtimeState: {
+        connection: {
+          status: 'live',
+          lastLiveAt: 0,
+          lastDisconnectReason: null,
+          reconcileNeeded: false,
+          reconnectAttempt: 0,
+        },
+        sessions: { main: { sessionId: 'main', status: 'running', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' } },
+        runs: {},
+        messages: {},
+        agentPresence: {},
+      },
+    });
+
+    subscribeMock.mockImplementation((listener: (event: GatewayEvent) => void) => {
+      onGatewayEvent = listener;
+      return () => {};
+    });
+
+    let messages: ChatMsg[] = [];
+    let streamHtml = '';
+    let isGenerating = false;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+        streamHtml = chat.stream.html;
+        isGenerating = chat.isGenerating;
+      }, [chat.isGenerating, chat.messages, chat.stream.html]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(onGatewayEvent).not.toBeNull());
+
+    const startedAt = Date.now();
+    await act(async () => {
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'send-ack-run',
+          state: 'started',
+          seq: 40,
+        },
+      });
+      onGatewayEvent!({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'stream-run',
+          state: 'delta',
+          seq: 41,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'N' }],
+            timestamp: startedAt,
+          },
+        },
+      });
+    });
+
+    await waitFor(() => expect(streamHtml).toContain('N'));
+
+    realtimeStateRef.current = {
+      ...realtimeStateRef.current,
+      runs: {
+        'final-run': {
+          runId: 'final-run',
+          sessionId: 'main',
+          status: 'completed',
+          messageIds: ['final-run:assistant'],
+          lastEventAt: startedAt + 2_000,
+          finalized: true,
+        },
+      },
+      messages: {
+        'final-run:assistant': {
+          messageId: 'final-run:assistant',
+          sessionId: 'main',
+          runId: 'final-run',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'NERVE_REALTIME_FINAL_DONE' }],
+          status: 'committed',
+          revision: 42,
+          createdAt: startedAt + 2_000,
+        },
+      },
+      agentPresence: {
+        main: {
+          sessionId: 'main',
+          agentId: 'main',
+          phase: 'completed',
+          lastSeenAt: startedAt + 2_000,
+        },
+      },
+    };
+
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(streamHtml).toBe('');
+      expect(isGenerating).toBe(false);
+      expect(messages.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+        'NERVE_REALTIME_FINAL_DONE',
+      ]);
     });
   });
 
@@ -869,6 +1709,112 @@ describe('ChatContext subscription stability', () => {
       expect(assistantMessages.map((message) => message.msgId)).toEqual(['hist-1', 'hist-2']);
       expect(assistantMessages.map((message) => message.collapsed)).toEqual([true, false]);
       expect(new Set(assistantMessages.map((message) => message.msgId)).size).toBe(2);
+    });
+  });
+
+  it('keeps projected realtime message IDs unique even when history contains duplicate msgIds', async () => {
+    const historyMessages: ChatMsg[] = [
+      {
+        msgId: 'hist-duplicate',
+        role: 'assistant',
+        html: 'OK',
+        rawText: 'OK',
+        timestamp: new Date(1_000),
+      },
+      {
+        msgId: 'hist-duplicate',
+        role: 'assistant',
+        html: 'OK',
+        rawText: 'OK',
+        timestamp: new Date(2_000),
+      },
+    ];
+    const { ChatProvider, useChat, gatewayState, realtimeStateRef } = await setup({
+      currentSession: 'main',
+      realtimeState: {
+        connection: {
+          status: 'live',
+          lastLiveAt: 0,
+          lastDisconnectReason: null,
+          reconcileNeeded: false,
+          reconnectAttempt: 0,
+        },
+        sessions: { main: { sessionId: 'main', status: 'idle', agentId: 'main', updatedAt: 1, sourceVersion: 'v1' } },
+        runs: {},
+        messages: {},
+        agentPresence: {},
+      },
+      loadChatHistoryImpl: async () => historyMessages,
+    });
+    gatewayState.connectionState = 'connected';
+
+    let messages: ChatMsg[] = [];
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        messages = chat.messages;
+      }, [chat.messages]);
+      return null;
+    }
+
+    const view = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(messages.map((message) => message.msgId)).toEqual(['hist-duplicate', 'hist-duplicate']);
+    });
+
+    realtimeStateRef.current = {
+      ...realtimeStateRef.current,
+      runs: {
+        'run-1': {
+          runId: 'run-1',
+          sessionId: 'main',
+          status: 'completed',
+          messageIds: ['rt-1', 'rt-2'],
+          lastEventAt: 3,
+          finalized: true,
+        },
+      },
+      messages: {
+        'rt-1': {
+          messageId: 'rt-1',
+          sessionId: 'main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'OK' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 1_000,
+        },
+        'rt-2': {
+          messageId: 'rt-2',
+          sessionId: 'main',
+          runId: 'run-1',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'OK' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 2_000,
+        },
+      },
+    };
+
+    view.rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      const assistantMessages = messages.filter((message) => message.role === 'assistant');
+      expect(assistantMessages).toHaveLength(2);
+      expect(new Set(assistantMessages.map((message) => message.msgId)).size).toBe(2);
+      expect(assistantMessages.map((message) => message.msgId)).toEqual(['hist-duplicate', 'rt-2']);
     });
   });
 

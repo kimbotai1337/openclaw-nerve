@@ -341,6 +341,69 @@ describe('normalized realtime events', () => {
     });
   });
 
+  it('starts a new fallback run on a runless chat start after a missing terminal frame', () => {
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(300)
+      .mockReturnValueOnce(301)
+      .mockReturnValueOnce(302);
+
+    const firstDelta: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 70,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'first partial' }] },
+      },
+    };
+
+    const nextStarted: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 71,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: 'started',
+      },
+    };
+
+    const nextDelta: GatewayEvent = {
+      type: 'event',
+      event: 'chat',
+      seq: 72,
+      payload: {
+        sessionKey: 'agent:main:main',
+        state: 'delta',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'second partial' }] },
+      },
+    };
+
+    const firstRunIds = normalizeGatewayEvent(firstDelta)
+      .filter((event): event is Extract<RealtimeEvent, { type: 'run.status_changed' | 'message.delta_applied' }> =>
+        event.type === 'run.status_changed' || event.type === 'message.delta_applied',
+      )
+      .map((event) => event.runId);
+    const startRunIds = normalizeGatewayEvent(nextStarted)
+      .filter((event): event is Extract<RealtimeEvent, { type: 'run.status_changed' }> => event.type === 'run.status_changed')
+      .map((event) => event.runId);
+    const nextRunIds = normalizeGatewayEvent(nextDelta)
+      .filter((event): event is Extract<RealtimeEvent, { type: 'run.status_changed' | 'message.delta_applied' }> =>
+        event.type === 'run.status_changed' || event.type === 'message.delta_applied',
+      )
+      .map((event) => event.runId);
+
+    expect(firstRunIds).toEqual([
+      'run-fallback:agent:main:main:1',
+      'run-fallback:agent:main:main:1',
+    ]);
+    expect(startRunIds).toEqual(['run-fallback:agent:main:main:2']);
+    expect(nextRunIds).toEqual([
+      'run-fallback:agent:main:main:2',
+      'run-fallback:agent:main:main:2',
+    ]);
+  });
+
   it('maps an agent lifecycle event into presence update when a phase exists', () => {
     vi.spyOn(Date, 'now').mockReturnValue(30);
 

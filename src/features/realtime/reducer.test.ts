@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialRealtimeState, realtimeReducer } from './reducer';
+import { selectSessionIsGenerating } from './selectors';
 import type { RealtimeEvent, RealtimeSnapshotPayload } from './types';
 
 function apply(stateEvents: RealtimeEvent[]) {
@@ -327,6 +328,68 @@ describe('realtimeReducer', () => {
     ]);
 
     expect(state.messages['assistant-1']).toEqual(committedMessage);
+  });
+
+  it('finalizes sibling active runs when a terminal final arrives under a different run id', () => {
+    const state = apply([
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'send-ack-run',
+        status: 'running',
+        finalized: false,
+      },
+      {
+        type: 'message.delta_applied',
+        eventId: 'evt-2',
+        receivedAt: 11,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'send-ack-run',
+        messageId: 'send-ack-run:assistant',
+        text: 'N',
+        revision: 11,
+      },
+      {
+        type: 'run.status_changed',
+        eventId: 'evt-3',
+        receivedAt: 12,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        runId: 'final-answer-run',
+        status: 'completed',
+        finalized: true,
+      },
+      {
+        type: 'message.committed',
+        eventId: 'evt-4',
+        receivedAt: 12,
+        source: 'live-chat',
+        sessionId: 'agent:main:main',
+        message: {
+          messageId: 'final-answer-run:assistant',
+          sessionId: 'agent:main:main',
+          runId: 'final-answer-run',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'NERVE_DUP_FIX_SMOKE_20260430_L' }],
+          status: 'committed',
+          revision: 12,
+          createdAt: 12,
+        },
+      },
+    ]);
+
+    expect(state.runs['send-ack-run']).toEqual(expect.objectContaining({
+      status: 'completed',
+      finalized: true,
+    }));
+    expect(state.messages['send-ack-run:assistant']).toEqual(expect.objectContaining({
+      status: 'superseded',
+    }));
+    expect(selectSessionIsGenerating(state, 'agent:main:main')).toBe(false);
   });
 
   it('keeps transport health independent while reconciliation resolves', () => {
@@ -781,6 +844,57 @@ describe('realtimeReducer', () => {
 
     expect(state.sessions['agent:main:main']?.status).toBe('running');
     expect(state.connection.reconcileNeeded).toBe(false);
+  });
+
+  it('keeps reconcile needed until every overlapping snapshot request has finished', () => {
+    const pendingState = apply([
+      {
+        type: 'connection.opened',
+        eventId: 'evt-1',
+        receivedAt: 10,
+        source: 'local',
+        sessionId: 'global',
+        reconnectAttempt: 0,
+      },
+      {
+        type: 'connection.reconcile_requested',
+        eventId: 'evt-2',
+        receivedAt: 11,
+        source: 'local',
+        sessionId: 'agent:main:main',
+        reason: 'session-switch',
+      },
+      {
+        type: 'connection.reconcile_requested',
+        eventId: 'evt-3',
+        receivedAt: 12,
+        source: 'local',
+        sessionId: 'agent:reviewer:main',
+        reason: 'session-switch',
+      },
+    ]);
+
+    expect(pendingState.connection.reconcileNeeded).toBe(true);
+
+    const oneFinishedState = realtimeReducer(pendingState, {
+      type: 'snapshot.merge_completed',
+      eventId: 'evt-4',
+      receivedAt: 13,
+      source: 'snapshot',
+      sessionId: 'agent:main:main',
+    });
+
+    expect(oneFinishedState.connection.reconcileNeeded).toBe(true);
+
+    const allFinishedState = realtimeReducer(oneFinishedState, {
+      type: 'snapshot.merge_completed',
+      eventId: 'evt-5',
+      receivedAt: 14,
+      source: 'snapshot',
+      sessionId: 'agent:reviewer:main',
+    });
+
+    expect(allFinishedState.connection.reconcileNeeded).toBe(false);
   });
 
   it('keeps finalized runs terminal and ignores duplicate run.created events', () => {

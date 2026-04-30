@@ -327,6 +327,18 @@ describe('processChatMessages', () => {
     expect(result[0].rawText).toBe('Already did it ⚡');
   });
 
+  it('preserves distinct historical assistant turns when a later answer merely extends the same prefix', () => {
+    const result = processChatMessages([
+      { role: 'assistant', content: 'Sure' },
+      { role: 'assistant', content: "Sure, here's the full answer." },
+    ]);
+
+    expect(result.filter((message) => message.role === 'assistant').map((message) => message.rawText)).toEqual([
+      'Sure',
+      "Sure, here's the full answer.",
+    ]);
+  });
+
   it('handles empty input', () => {
     expect(processChatMessages([])).toHaveLength(0);
   });

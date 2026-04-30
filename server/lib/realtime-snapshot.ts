@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 const SESSIONS_ACTIVE_MINUTES = 24 * 60;
 const SESSIONS_LIMIT = 200;
+const FALLBACK_SESSIONS_LIMIT = 1000;
 
 const ACTIVE_RUN_STATUSES = new Set([
   'running',
@@ -216,19 +217,45 @@ function getSessionKey(session: GatewaySessionSummary): string | null {
     ?? trimToNull(session.id);
 }
 
+function getSessionsFromResult(result: GatewaySessionsListResponse): GatewaySessionSummary[] {
+  return Array.isArray(result.sessions) ? result.sessions : [];
+}
+
+async function findSessionOutsideActiveWindow(sessionKey: string): Promise<GatewaySessionSummary | null> {
+  try {
+    const result = await gatewayRpcCall('sessions.list', {
+      limit: FALLBACK_SESSIONS_LIMIT,
+    }) as GatewaySessionsListResponse;
+    return getSessionsFromResult(result).find((entry) => getSessionKey(entry) === sessionKey) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function getAgentIdFromSessionKey(sessionKey: string): string | null {
   const match = sessionKey.match(/^agent:([^:]+):/);
   return match?.[1] || null;
 }
 
 function resolveSessionStatus(session: GatewaySessionSummary | null): string {
-  const normalized = trimToNull(session?.status)?.toLowerCase()
-    ?? trimToNull(session?.state)?.toLowerCase()
-    ?? trimToNull(session?.agentState)?.toLowerCase();
-  if (normalized) return normalized;
   if (session?.busy || session?.processing) return 'running';
+
+  const agentState = trimToNull(session?.agentState)?.toLowerCase() ?? null;
+  const state = trimToNull(session?.state)?.toLowerCase() ?? null;
+  const status = trimToNull(session?.status)?.toLowerCase() ?? null;
+  const orderedStatuses = [agentState, state, status].filter((value): value is string => Boolean(value));
+  const activeStatus = orderedStatuses.find((value) =>
+    ACTIVE_RUN_STATUSES.has(value) || QUEUED_RUN_STATUSES.has(value),
+  );
+  if (activeStatus) return activeStatus;
+
+  const failureStatus = orderedStatuses.find((value) =>
+    FAILED_RUN_STATUSES.has(value) || INTERRUPTED_RUN_STATUSES.has(value),
+  );
+  if (failureStatus) return failureStatus;
+
   if (session?.abortedLastRun) return 'interrupted';
-  return 'unknown';
+  return status ?? state ?? agentState ?? 'unknown';
 }
 
 function resolvePresencePhase(session: GatewaySessionSummary | null): string | null {
@@ -635,8 +662,9 @@ export async function buildRealtimeSnapshot(
     gatewayRpcCall('chat.history', { sessionKey, limit }) as Promise<GatewayChatHistoryResponse>,
   ]);
 
-  const sessions = Array.isArray(sessionsResult.sessions) ? sessionsResult.sessions : [];
-  const session = sessions.find((entry) => getSessionKey(entry) === sessionKey) ?? null;
+  const sessions = getSessionsFromResult(sessionsResult);
+  const session = sessions.find((entry) => getSessionKey(entry) === sessionKey)
+    ?? await findSessionOutsideActiveWindow(sessionKey);
 
   const rawMessages = Array.isArray(historyResult.messages) ? historyResult.messages : [];
   const normalizedMessages = rawMessages

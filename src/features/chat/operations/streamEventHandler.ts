@@ -220,6 +220,7 @@ function hasLaterAssistantTextReplacement(
   messages: ChatMessage[],
   startIndex: number,
   assistantText: string,
+  allowPrefixReplacement: boolean,
 ): boolean {
   const normalizedCurrent = normalizeAssistantText(assistantText);
   if (!normalizedCurrent) return false;
@@ -232,12 +233,21 @@ function hasLaterAssistantTextReplacement(
     if (normalizedLater === normalizedCurrent) {
       return true;
     }
-    if (normalizedLater.length > normalizedCurrent.length && normalizedLater.startsWith(normalizedCurrent)) {
+    if (
+      allowPrefixReplacement
+      && normalizedLater.length > normalizedCurrent.length
+      && normalizedLater.startsWith(normalizedCurrent)
+    ) {
       return true;
     }
   }
 
   return false;
+}
+
+function hasNonTextAssistantTranscriptContent(message: ChatMessage): boolean {
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return false;
+  return message.content.some((block) => block.type !== 'text');
 }
 
 function stripAssistantTextFromMessage(message: ChatMessage): ChatMessage | null {
@@ -267,7 +277,12 @@ function pruneRedundantAssistantPrefixMessages(messages: ChatMessage[]): ChatMes
   return messages.flatMap((message, index) => {
     const assistantText = extractAssistantTextContent(message);
     if (!assistantText) return [message];
-    if (!hasLaterAssistantTextReplacement(messages, index, assistantText)) return [message];
+    if (!hasLaterAssistantTextReplacement(
+      messages,
+      index,
+      assistantText,
+      hasNonTextAssistantTranscriptContent(message),
+    )) return [message];
 
     const strippedMessage = stripAssistantTextFromMessage(message);
     return strippedMessage ? [strippedMessage] : [];

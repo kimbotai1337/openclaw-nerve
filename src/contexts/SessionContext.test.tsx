@@ -415,6 +415,175 @@ describe('SessionContext', () => {
     expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
   });
 
+  it('prefers active runs over newer wall-clock terminal snapshot runs', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const view = render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('NONE');
+    });
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      runs: {
+        'run-snapshot-terminal': {
+          runId: 'run-snapshot-terminal',
+          sessionId: 'agent:reviewer:main',
+          status: 'completed',
+          messageIds: ['run-snapshot-terminal:assistant'],
+          lastEventAt: 10_000,
+          finalized: true,
+        },
+        'run-live-active': {
+          runId: 'run-live-active',
+          sessionId: 'agent:reviewer:main',
+          status: 'running',
+          messageIds: [],
+          lastEventAt: 100,
+          finalized: false,
+        },
+      },
+      messages: {
+        'run-snapshot-terminal:assistant': {
+          messageId: 'run-snapshot-terminal:assistant',
+          sessionId: 'agent:reviewer:main',
+          runId: 'run-snapshot-terminal',
+          role: 'assistant',
+          contentParts: [{ type: 'text', text: 'older completed answer' }],
+          status: 'committed',
+          revision: 1,
+          createdAt: 10_000,
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+  });
+
+  it('refreshes the DONE-to-IDLE timer when a second completion arrives with the same visible status', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const view = render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('NONE');
+    });
+
+    vi.useFakeTimers();
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      runs: {
+        'run-first': {
+          runId: 'run-first',
+          sessionId: 'agent:reviewer:main',
+          status: 'completed',
+          messageIds: [],
+          lastEventAt: 1_000,
+          finalized: true,
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    realtimeStateValue = {
+      ...realtimeStateValue,
+      runs: {
+        'run-first': {
+          runId: 'run-first',
+          sessionId: 'agent:reviewer:main',
+          status: 'completed',
+          messageIds: [],
+          lastEventAt: 1_000,
+          finalized: true,
+        },
+        'run-second': {
+          runId: 'run-second',
+          sessionId: 'agent:reviewer:main',
+          status: 'completed',
+          messageIds: [],
+          lastEventAt: 2_000,
+          finalized: true,
+        },
+      },
+    };
+
+    await act(async () => {
+      view.rerender(
+        <SessionProvider>
+          <SessionStatusProbe />
+        </SessionProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_100);
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+  });
+
   it('derives finalized chat failures as error from realtime runs', async () => {
     rpcMock.mockImplementation(async (method: string) => {
       if (method === 'sessions.list') {

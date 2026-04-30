@@ -28,11 +28,20 @@ const MIME_MAP: Record<string, string> = {
 /** Directories we allow serving files from. */
 function allowedPrefixes(): string[] {
   const home = os.homedir();
-  return [
+  const prefixes = [
     '/tmp',
     path.join(home, '.openclaw'),
     config.memoryDir,
   ].filter(Boolean);
+
+  return Array.from(new Set(prefixes.flatMap((prefix) => {
+    const resolved = path.resolve(prefix);
+    try {
+      return [resolved, fs.realpathSync.native(resolved)];
+    } catch {
+      return [resolved];
+    }
+  })));
 }
 
 app.get('/api/files', async (c) => {

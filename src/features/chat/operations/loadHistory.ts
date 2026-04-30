@@ -554,17 +554,26 @@ function normalizeAssistantBubbleText(text: string): string {
 function hasLaterAssistantPrefixReplacement(msgs: ChatMsg[], startIndex: number, text: string): boolean {
   const normalizedCurrent = normalizeAssistantBubbleText(text);
   if (!normalizedCurrent) return false;
+  let sawToolBetween = false;
 
   for (let index = startIndex + 1; index < msgs.length; index++) {
     const candidate = msgs[index];
     if (candidate.role === 'user') break;
+    if (candidate.role === 'tool' || candidate.role === 'toolResult' || candidate.toolGroup) {
+      sawToolBetween = true;
+      continue;
+    }
     if (candidate.role !== 'assistant' || candidate.isThinking) continue;
     if (!candidate.rawText.trim()) continue;
 
     const normalizedLater = normalizeAssistantBubbleText(candidate.rawText);
     if (!normalizedLater) continue;
     if (normalizedLater === normalizedCurrent) return true;
-    if (normalizedLater.length > normalizedCurrent.length && normalizedLater.startsWith(normalizedCurrent)) {
+    if (
+      sawToolBetween
+      && normalizedLater.length > normalizedCurrent.length
+      && normalizedLater.startsWith(normalizedCurrent)
+    ) {
       return true;
     }
   }

@@ -84,6 +84,69 @@ describe('MessageBubble', () => {
     });
   });
 
+  it('re-renders mission time when message or first-message timestamps change', async () => {
+    const firstMessageTime = new Date('2026-03-18T12:00:00Z');
+    const { container, rerender } = render(
+      <MessageBubble
+        msg={makeMessage({
+          role: 'assistant',
+          rawText: 'timestamp smoke',
+          timestamp: new Date('2026-03-18T12:00:00Z'),
+        })}
+        index={0}
+        isCollapsed={false}
+        isMemoryCollapsed={false}
+        onToggleCollapse={() => {}}
+        onToggleMemory={() => {}}
+        firstMessageTime={firstMessageTime}
+      />,
+    );
+
+    expect(container.textContent).toContain('T+00:00:00');
+
+    rerender(
+      <MessageBubble
+        msg={makeMessage({
+          role: 'assistant',
+          rawText: 'timestamp smoke',
+          timestamp: new Date('2026-03-18T12:01:00Z'),
+        })}
+        index={0}
+        isCollapsed={false}
+        isMemoryCollapsed={false}
+        onToggleCollapse={() => {}}
+        onToggleMemory={() => {}}
+        firstMessageTime={firstMessageTime}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T+00:01:00');
+      expect(container.textContent).not.toContain('T+00:00:00');
+    });
+
+    rerender(
+      <MessageBubble
+        msg={makeMessage({
+          role: 'assistant',
+          rawText: 'timestamp smoke',
+          timestamp: new Date('2026-03-18T12:01:00Z'),
+        })}
+        index={0}
+        isCollapsed={false}
+        isMemoryCollapsed={false}
+        onToggleCollapse={() => {}}
+        onToggleMemory={() => {}}
+        firstMessageTime={new Date('2026-03-18T11:59:00Z')}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T+00:02:00');
+      expect(container.textContent).not.toContain('T+00:01:00');
+    });
+  });
+
   it('renders upload attachment metadata for user messages loaded from history', async () => {
     const { getByText } = render(
       <MessageBubble
