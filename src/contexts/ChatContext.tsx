@@ -320,8 +320,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (connectionState !== 'connected' || !currentSession) return;
     const stateHint = currentSessionMeta?.state || currentSessionMeta?.status || currentSessionMeta?.agentState || currentSessionMeta?.subagentRunState || currentSessionMeta?.phase;
     if (sessionLooksTerminal(currentSessionMeta)) {
-      const wasActive = isGeneratingRef.current || Boolean(activeRunIdRef.current);
-      finishHydratedSessionRun(stateHint);
+      const hasLiveRun = Boolean(activeRunIdRef.current);
+      const wasActive = isGeneratingRef.current || hasLiveRun;
+      if (!hasLiveRun) finishHydratedSessionRun(stateHint);
       if (wasActive) triggerRecovery('reconnect');
       return;
     }
@@ -407,7 +408,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (activeUpdate) {
           hydrateActiveSessionRun(stateHint);
         }
-        if (terminalUpdate) {
+        if (terminalUpdate && !activeRunIdRef.current) {
           finishHydratedSessionRun(stateHint);
         }
         const shouldRecoverFromMessage = msg.event === 'session.message'

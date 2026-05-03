@@ -465,6 +465,47 @@ describe('SessionContext', () => {
     });
   });
 
+  it('clears stale terminal phase and inactive flag when a legacy active event starts', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, status: 'done', phase: 'end' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-phase').textContent).toBe('end');
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('false');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'chat',
+        payload: { sessionKey: 'agent:reviewer:main', state: 'started' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-phase').textContent).toBe('NONE');
+      expect(screen.getByTestId('reviewer-snapshot-status').textContent).toBe('running');
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('true');
+    });
+  });
+
   it('does not let stale running status mask terminal agentState snapshots', async () => {
     let terminal = false;
     rpcMock.mockImplementation(async (method: string) => {

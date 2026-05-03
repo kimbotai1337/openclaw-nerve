@@ -748,6 +748,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const extractSessionUpdates = useCallback((state: string | undefined, payload: Partial<EventPayload>): Partial<Session> => {
     const updates: Partial<Session> = {};
     const phase = lowerString(payload.phase);
+    const stateValue = lowerString(state);
+    const activeLegacyState = Boolean(stateValue)
+      && BUSY_STATES.has(stateValue)
+      && phase !== 'start'
+      && phase !== 'end'
+      && phase !== 'error'
+      && !snapshotHasExplicitInactiveRun(payload);
     if (state) updates.state = state;
     if (typeof payload.phase === 'string') updates.phase = payload.phase;
     if (typeof payload.status === 'string') updates.status = payload.status;
@@ -761,10 +768,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if ('totalTokens' in payload && typeof payload.totalTokens === 'number') updates.totalTokens = payload.totalTokens;
     if ('contextTokens' in payload && typeof payload.contextTokens === 'number') updates.contextTokens = payload.contextTokens;
 
-    if (phase === 'start') {
+    if (phase === 'start' || activeLegacyState) {
       updates.hasActiveRun = true;
-      // A lifecycle start may be phase-only. Clear stale terminal strings so
-      // cached snapshots don't look ended until the next full refresh arrives.
+      // A lifecycle start may be phase-only, and legacy chat/agent starts may
+      // arrive after a terminal phase-only snapshot. Clear stale terminal
+      // strings/flags so cached snapshots don't look ended until refresh.
+      if (activeLegacyState && typeof payload.phase !== 'string') updates.phase = undefined;
       if (!state) updates.state = 'running';
       if (typeof payload.status !== 'string') updates.status = 'running';
     }
