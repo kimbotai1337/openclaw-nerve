@@ -26,15 +26,27 @@ function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-function sessionSnapshotIsActive(session: Partial<Session>): boolean {
+type SessionSnapshotLike = Partial<Session & EventPayload>;
+
+function sessionSnapshotIsActive(session: SessionSnapshotLike): boolean {
   if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => BUSY_STATES.has(state));
 }
 
-function sessionPayloadIsTerminal(payload: Partial<EventPayload>): boolean {
-  return [payload.state, payload.status].map(lowerString).some((state) => IDLE_STATES.has(state));
+function sessionSnapshotIsTerminal(snapshot: SessionSnapshotLike): boolean {
+  const phase = lowerString(snapshot.phase);
+  if (phase === 'end' || phase === 'error') return true;
+  return [snapshot.state, snapshot.status].map(lowerString).some((state) => IDLE_STATES.has(state));
+}
+
+function terminalAgentStatus(snapshot: SessionSnapshotLike): GranularAgentState['status'] {
+  const phase = lowerString(snapshot.phase);
+  const state = lowerString(snapshot.status || snapshot.state);
+  if (phase === 'error' || state === 'error' || state === 'failed' || state === 'timeout') return 'ERROR';
+  if (state === 'idle' || state === 'aborted' || state === 'cancelled' || state === 'killed' || state === 'stopped') return 'IDLE';
+  return 'DONE';
 }
 
 // Use the full session list for the sidebar so older root chats stay visible.
@@ -98,11 +110,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const doneTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const delayedRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Derive busyState from agentStatus for backward compatibility
+  // Derive busyState from active granular statuses for backward compatibility.
   const busyState = useMemo(() => {
     const result: Record<string, boolean> = {};
     for (const [key, state] of Object.entries(agentStatus)) {
-      result[key] = state.status !== 'IDLE' && state.status !== 'DONE';
+      result[key] = state.status === 'THINKING' || state.status === 'STREAMING';
     }
     return result;
   }, [agentStatus]);
@@ -191,6 +203,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => controller.abort();
   }, []);
   const sessionsRef = useRef(sessions);
+  const agentStatusRef = useRef(agentStatus);
   
   // Update refs in effect to avoid render-time mutations
   useEffect(() => {
@@ -278,6 +291,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     sessionsRef.current = displaySessions;
   }, [displaySessions]);
+
+  useEffect(() => {
+    agentStatusRef.current = agentStatus;
+  }, [agentStatus]);
   
   const currentSessionRef = useRef(currentSession);
   useEffect(() => {
@@ -627,12 +644,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       for (const session of newSessions) {
         const key = getSessionKey(session);
-        if (!key || !sessionSnapshotIsActive(session)) continue;
-        const stage = lowerString(session.state || session.status || session.agentState || session.subagentRunState);
-        setGranularStatus(key, {
-          status: stage === 'delta' || stage === 'streaming' ? 'STREAMING' : 'THINKING',
-          since: Date.now(),
-        });
+        if (!key) continue;
+        const terminal = sessionSnapshotIsTerminal(session);
+        if (!terminal && sessionSnapshotIsActive(session)) {
+          const stage = lowerString(session.state || session.status || session.agentState || session.subagentRunState);
+          setGranularStatus(key, {
+            status: stage === 'delta' || stage === 'streaming' ? 'STREAMING' : 'THINKING',
+            since: Date.now(),
+          });
+          continue;
+        }
+
+        if (terminal) {
+          const existingStatus = agentStatusRef.current[key]?.status;
+          if (existingStatus === 'THINKING' || existingStatus === 'STREAMING' || existingStatus === 'ERROR') {
+            const nextStatus = terminalAgentStatus(session);
+            setGranularStatus(key, { status: nextStatus, since: Date.now() });
+            if (isTopLevelAgentSessionKey(key) && existingStatus !== 'ERROR' && nextStatus !== 'IDLE') {
+              markSessionUnread(key);
+              pingSession(key);
+            }
+          }
+        }
       }
 
       setCurrentSession(nextCurrentSession);
@@ -641,7 +674,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       setSessionsLoading(false);
     }
-  }, [connectionState, listAuthoritativeSessions, setCurrentSession, setGranularStatus]);
+  }, [connectionState, listAuthoritativeSessions, markSessionUnread, pingSession, setCurrentSession, setGranularStatus]);
 
   const refreshSessionsRef = useRef(refreshSessions);
   useEffect(() => {
@@ -696,7 +729,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const phase = lowerString(payload.phase);
     if (phase === 'start') updates.hasActiveRun = true;
     if (phase === 'end' || phase === 'error') updates.hasActiveRun = false;
-    if (sessionPayloadIsTerminal(payload)) updates.hasActiveRun = false;
+    if (sessionSnapshotIsTerminal(payload)) updates.hasActiveRun = false;
 
     return updates;
   }, []);
@@ -736,27 +769,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const phase = lowerString(p.phase);
         const state = lowerString(p.state || p.status);
 
-        if (phase === 'start' || sessionSnapshotIsActive(p)) {
+        const terminal = sessionSnapshotIsTerminal(p);
+        if (!terminal && (phase === 'start' || sessionSnapshotIsActive(p))) {
           setGranularStatus(sk, {
             status: state === 'delta' || state === 'streaming' ? 'STREAMING' : 'THINKING',
             since: Date.now(),
           });
           if (isTopLevelAgentSessionKey(sk)) markSessionUnread(sk);
-        } else if (phase === 'end' || state === 'done' || state === 'final' || state === 'completed') {
-          setGranularStatus(sk, { status: 'DONE', since: Date.now() });
-          if (isTopLevelAgentSessionKey(sk)) {
+        } else if (terminal) {
+          const nextStatus = terminalAgentStatus(p);
+          setGranularStatus(sk, { status: nextStatus, since: Date.now() });
+          if (isTopLevelAgentSessionKey(sk) && nextStatus !== 'IDLE') {
             markSessionUnread(sk);
             pingSession(sk);
           }
           refreshSessions();
-          scheduleDelayedRefresh();
-        } else if (phase === 'error' || state === 'error') {
-          setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
-          if (isTopLevelAgentSessionKey(sk)) {
-            markSessionUnread(sk);
-            pingSession(sk);
-          }
-          refreshSessions();
+          if (nextStatus === 'DONE') scheduleDelayedRefresh();
         }
 
         const updates = extractSessionUpdates(p.state || p.status, p);

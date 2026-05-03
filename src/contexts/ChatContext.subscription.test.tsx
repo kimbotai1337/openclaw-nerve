@@ -21,6 +21,10 @@ describe('ChatContext subscription stability', () => {
     sessions?: Session[];
   } = {}) {
     const subscribedHandlers: Array<(msg: GatewayEvent) => void> = [];
+    let sessions = options.sessions || [];
+    const setSessions = (nextSessions: Session[]) => {
+      sessions = nextSessions;
+    };
     const subscribeMock = vi.fn((handler: (msg: GatewayEvent) => void) => {
       subscribedHandlers.push(handler);
       return () => {};
@@ -42,7 +46,7 @@ describe('ChatContext subscription stability', () => {
     vi.doMock('./SessionContext', () => ({
       useSessionContext: () => ({
         currentSession: options.currentSession || 'main',
-        sessions: options.sessions || [],
+        sessions,
       }),
     }));
 
@@ -54,7 +58,7 @@ describe('ChatContext subscription stability', () => {
     }));
 
     const mod = await import('./ChatContext');
-    return { ...mod, rpcMock, subscribeMock, subscribedHandlers };
+    return { ...mod, rpcMock, subscribeMock, subscribedHandlers, setSessions };
   }
 
   it('keeps a single subscribe registration after handleSend-triggered rerender', async () => {
@@ -134,6 +138,48 @@ describe('ChatContext subscription stability', () => {
     });
     expect(screen.getByTestId('processing-stage').textContent).toBe('thinking');
 
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
+    });
+  });
+
+  it('clears hydrated generation state from a terminal refreshed session snapshot', async () => {
+    const { ChatProvider, useChat, setSessions, rpcMock } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+
+    setSessions([{ sessionKey: 'main', hasActiveRun: false, status: 'done' }]);
+    rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('NONE');
     await waitFor(() => {
       expect(rpcMock).toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
     });

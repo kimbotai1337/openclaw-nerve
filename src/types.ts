@@ -26,6 +26,7 @@ export interface Session {
   hasActiveSubagentRun?: boolean;
   subagentRunState?: string;
   status?: string;
+  phase?: string;
   startedAt?: number;
   endedAt?: number;
   runtimeMs?: number;

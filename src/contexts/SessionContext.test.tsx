@@ -86,6 +86,16 @@ function SessionStatusProbe() {
   return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
 }
 
+function SessionBusyProbe() {
+  const { agentStatus, busyState } = useSessionContext();
+  return (
+    <div>
+      <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>
+      <div data-testid="reviewer-busy">{String(Boolean(busyState['agent:reviewer:main']))}</div>
+    </div>
+  );
+}
+
 describe('SessionContext', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -184,6 +194,79 @@ describe('SessionContext', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+  });
+
+  it('clears active run status from terminal sessions.list snapshots', async () => {
+    let terminal = false;
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            terminal
+              ? { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, status: 'done' }
+              : { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: true, status: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionRefreshProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+
+    terminal = true;
+    await act(async () => {
+      screen.getByTestId('refresh-sessions').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+    });
+  });
+
+  it('clears busy state from terminal subscribed session snapshots', async () => {
+    render(
+      <SessionProvider>
+        <SessionBusyProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandler).toBeTruthy());
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', hasActiveRun: true, status: 'running' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-busy').textContent).toBe('true');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', hasActiveRun: false, status: 'failed' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('ERROR');
+      expect(screen.getByTestId('reviewer-busy').textContent).toBe('false');
     });
   });
 

@@ -308,11 +308,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // looking idle until the final transcript lands.
   useEffect(() => {
     if (connectionState !== 'connected' || !currentSession) return;
+    const stateHint = currentSessionMeta?.state || currentSessionMeta?.status || currentSessionMeta?.agentState || currentSessionMeta?.subagentRunState || currentSessionMeta?.phase;
+    if (sessionLooksTerminal(currentSessionMeta)) {
+      const wasActive = isGeneratingRef.current || Boolean(activeRunIdRef.current);
+      finishHydratedSessionRun(stateHint);
+      if (wasActive) triggerRecovery('reconnect');
+      return;
+    }
     if (!sessionLooksActive(currentSessionMeta)) return;
-    hydrateActiveSessionRun(
-      currentSessionMeta?.state || currentSessionMeta?.status || currentSessionMeta?.agentState || currentSessionMeta?.subagentRunState,
-    );
-  }, [connectionState, currentSession, currentSessionMeta, hydrateActiveSessionRun]);
+    hydrateActiveSessionRun(stateHint);
+  }, [connectionState, currentSession, currentSessionMeta, finishHydratedSessionRun, hydrateActiveSessionRun, triggerRecovery]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────
   const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;
