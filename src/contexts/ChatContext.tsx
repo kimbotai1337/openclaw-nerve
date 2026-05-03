@@ -111,13 +111,20 @@ function sessionLooksActive(session?: Partial<Session & EventPayload> | null): b
   if (!session) return false;
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return false;
-  // The chat pane should only hydrate the selected session's own run. A parent
-  // with only an active child/subagent belongs in the sidebar, not Stop/send UI.
-  if (session.hasActiveSubagentRun === true && session.hasActiveRun !== true) return false;
   if (session.hasActiveRun === true || session.busy === true || session.processing === true) return true;
   if (session.hasActiveRun === false || session.busy === false || session.processing === false) return false;
   if (phase === 'start') return true;
-  return [session.state, session.status, session.agentState, session.subagentRunState]
+
+  const ownStateActive = [session.state, session.status, session.agentState]
+    .map(lowerString)
+    .some((state) => ACTIVE_SESSION_STATES.has(state));
+  if (ownStateActive) return true;
+
+  // The chat pane should only hydrate the selected session's own run. A parent
+  // with only an active child/subagent belongs in the sidebar, not Stop/send UI.
+  if (session.hasActiveSubagentRun === true) return false;
+
+  return [session.subagentRunState]
     .map(lowerString)
     .some((state) => ACTIVE_SESSION_STATES.has(state));
 }
@@ -251,7 +258,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     isGeneratingRef.current = false;
     setIsGenerating(false);
     activeRunIdRef.current = null;
-    incrementGeneration();
     setProcessingStage(null);
     setActivityLog([]);
     setLastEventTimestamp(0);
@@ -262,7 +268,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (state !== 'error' && state !== 'failed') {
       playCompletionPing();
     }
-  }, [clearStreamBuffer, clearTerminalSnapshotFinish, incrementGeneration, playCompletionPing, resetThinking, setActivityLog, setLastEventTimestamp, setProcessingStage]);
+  }, [clearStreamBuffer, clearTerminalSnapshotFinish, playCompletionPing, resetThinking, setActivityLog, setLastEventTimestamp, setProcessingStage]);
 
   const scheduleTerminalSnapshotFinish = useCallback((stateHint?: string) => {
     const activeRunId = activeRunIdRef.current;

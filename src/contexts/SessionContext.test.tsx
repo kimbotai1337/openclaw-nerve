@@ -544,6 +544,57 @@ describe('SessionContext', () => {
     });
   });
 
+  it('keeps lifecycle terminal updates sticky when a delayed refresh returns stale active data', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: true, status: 'running', phase: 'start' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('true');
+    });
+
+    vi.useFakeTimers();
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          stream: 'lifecycle',
+          data: { phase: 'end' },
+        },
+      });
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+    expect(screen.getByTestId('reviewer-active-run').textContent).toBe('false');
+    expect(screen.getByTestId('reviewer-phase').textContent).toBe('end');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(screen.getByTestId('reviewer-active-run').textContent).toBe('false');
+    expect(screen.getByTestId('reviewer-snapshot-status').textContent).toBe('done');
+    expect(screen.getByTestId('reviewer-phase').textContent).toBe('end');
+  });
+
   it('keeps terminal event snapshots sticky when a delayed refresh returns stale active data', async () => {
     rpcMock.mockImplementation(async (method: string) => {
       if (method === 'sessions.list') {

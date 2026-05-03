@@ -189,6 +189,56 @@ describe('ChatContext subscription stability', () => {
     expect(rpcMock).not.toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
   });
 
+  it('hydrates selected chat when child activity is accompanied by own-run legacy signals', async () => {
+    const { ChatProvider, useChat, rpcMock } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveSubagentRun: true, busy: true }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return <div data-testid="is-generating">{String(chat.isGenerating)}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
+    });
+  });
+
+  it('hydrates selected chat when child activity is accompanied by own active status', async () => {
+    const { ChatProvider, useChat, rpcMock } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveSubagentRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return <div data-testid="is-generating">{String(chat.isGenerating)}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
+    });
+  });
+
   it('does not hydrate from stale running text when explicit own run flag is inactive', async () => {
     const { ChatProvider, useChat, rpcMock } = await setup({
       connectionState: 'connected',
@@ -431,6 +481,71 @@ describe('ChatContext subscription stability', () => {
     });
 
     expect(screen.getByTestId('is-generating').textContent).toBe('false');
+  });
+
+  it('keeps slow terminal recovery results valid after a missed chat final frame', async () => {
+    const { ChatProvider, useChat, subscribedHandlers, rpcMock } = await setup({ connectionState: 'connected' });
+
+    let send: ((text: string, images?: ImageAttachment[]) => Promise<void>) | null = null;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        send = chat.handleSend;
+      }, [chat]);
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="messages">{chat.messages.map((m) => m.rawText || m.html).join('\n')}</div>
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandlers.length).toBe(1));
+    await act(async () => {
+      await send!('hello');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'chat.send') return { runId: 'run-1', status: 'started' };
+      if (method === 'chat.history') {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return { messages: [{ role: 'assistant', content: 'recovered final' }] };
+      }
+      return {};
+    });
+
+    vi.useFakeTimers();
+
+    act(() => {
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'main', hasActiveRun: false, status: 'done' },
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(screen.getByTestId('is-generating').textContent).toBe('false');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByTestId('messages').textContent).toContain('recovered final');
   });
 
   it('clears hydrated generation state from a terminal agentState refreshed session snapshot', async () => {

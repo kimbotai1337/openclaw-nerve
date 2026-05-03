@@ -901,8 +901,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (stream === 'lifecycle') {
             const phase = (ap.data as Record<string, unknown> | undefined)?.phase;
             if (phase === 'start') {
+              updateSessionFromEvent(sk, { phase: 'start', status: 'running', hasActiveRun: true });
               setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             } else if (phase === 'end') {
+              updateSessionFromEvent(sk, { phase: 'end', status: 'done', hasActiveRun: false });
               setGranularStatus(sk, { status: 'DONE', since: Date.now() });
               if (isTopLevelAgentSessionKey(sk)) {
                 markSessionUnread(sk);
@@ -910,6 +912,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               }
               scheduleDelayedRefresh();
             } else if (phase === 'error') {
+              updateSessionFromEvent(sk, { phase: 'error', status: 'error', hasActiveRun: false });
               setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
               if (isTopLevelAgentSessionKey(sk)) {
                 markSessionUnread(sk);
