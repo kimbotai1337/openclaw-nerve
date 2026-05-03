@@ -22,6 +22,18 @@ function renderSessionList(props: Partial<React.ComponentProps<typeof SessionLis
   );
 }
 
+describe('SessionList active state detection', () => {
+  it('does not expose abort for terminal phase snapshots with stale running status', () => {
+    const sessions: Session[] = [
+      { sessionKey: 'agent:reviewer:main', label: 'Reviewer', phase: 'end', status: 'running' },
+    ];
+
+    renderSessionList({ sessions, onAbort: vi.fn() });
+
+    expect(screen.queryByTitle('Abort session')).not.toBeInTheDocument();
+  });
+});
+
 describe('SessionList empty state', () => {
   it('shows the empty state when all sessions are filtered out of the agent sidebar', () => {
     const sessions: Session[] = [

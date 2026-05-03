@@ -19,7 +19,7 @@ import {
   getRootAgentId,
 } from '@/features/sessions/sessionKeys';
 
-const BUSY_STATES = new Set(['running', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
+const BUSY_STATES = new Set(['running', 'busy', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
 const IDLE_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
 
 function lowerString(value: unknown): string {
@@ -38,12 +38,14 @@ function sessionSnapshotIsActive(session: SessionSnapshotLike): boolean {
 function sessionSnapshotIsTerminal(snapshot: SessionSnapshotLike): boolean {
   const phase = lowerString(snapshot.phase);
   if (phase === 'end' || phase === 'error') return true;
-  return [snapshot.state, snapshot.status].map(lowerString).some((state) => IDLE_STATES.has(state));
+  return [snapshot.state, snapshot.status, snapshot.agentState, snapshot.subagentRunState]
+    .map(lowerString)
+    .some((state) => IDLE_STATES.has(state));
 }
 
 function terminalAgentStatus(snapshot: SessionSnapshotLike): GranularAgentState['status'] {
   const phase = lowerString(snapshot.phase);
-  const state = lowerString(snapshot.status || snapshot.state);
+  const state = lowerString(snapshot.status || snapshot.state || snapshot.agentState || snapshot.subagentRunState);
   if (phase === 'error' || state === 'error' || state === 'failed' || state === 'timeout') return 'ERROR';
   if (state === 'idle' || state === 'aborted' || state === 'cancelled' || state === 'killed' || state === 'stopped') return 'IDLE';
   return 'DONE';
@@ -401,6 +403,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         delete doneTimeoutsRef.current[sessionKey];
       }, 3000);
     }
+    const currentRefState = agentStatusRef.current[sessionKey];
+    if (!currentRefState || currentRefState.status !== state.status || currentRefState.toolName !== state.toolName) {
+      agentStatusRef.current = { ...agentStatusRef.current, [sessionKey]: state };
+    }
     setAgentStatus(prev => {
       const existing = prev[sessionKey];
       // Optimization: skip update if status/tool haven't changed
@@ -611,6 +617,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const changed = (
             existing.state !== newSession.state ||
             existing.status !== newSession.status ||
+            existing.phase !== newSession.phase ||
             existing.agentState !== newSession.agentState ||
             existing.hasActiveRun !== newSession.hasActiveRun ||
             existing.hasActiveSubagentRun !== newSession.hasActiveSubagentRun ||

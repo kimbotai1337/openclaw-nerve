@@ -143,6 +143,28 @@ describe('ChatContext subscription stability', () => {
     });
   });
 
+  it('hydrates active generation state from a busy refreshed session snapshot', async () => {
+    const { ChatProvider, useChat } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', status: 'busy' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return <div data-testid="is-generating">{String(chat.isGenerating)}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+  });
+
   it('clears hydrated generation state from a terminal refreshed session snapshot', async () => {
     const { ChatProvider, useChat, setSessions, rpcMock } = await setup({
       connectionState: 'connected',
@@ -183,6 +205,45 @@ describe('ChatContext subscription stability', () => {
     await waitFor(() => {
       expect(rpcMock).toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
     });
+  });
+
+  it('clears hydrated generation state from a terminal agentState refreshed session snapshot', async () => {
+    const { ChatProvider, useChat, setSessions } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', agentState: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+
+    setSessions([{ sessionKey: 'main', agentState: 'done' }]);
+    rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('NONE');
   });
 
   it('hydrates active generation state from a subscribed lifecycle event after refresh', async () => {

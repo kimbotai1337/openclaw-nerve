@@ -99,7 +99,7 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
-const ACTIVE_SESSION_STATES = new Set(['running', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
+const ACTIVE_SESSION_STATES = new Set(['running', 'busy', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
 const TERMINAL_SESSION_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
 
 function lowerString(value: unknown): string {
@@ -119,7 +119,9 @@ function sessionLooksTerminal(session?: Partial<Session & EventPayload> | null):
   if (!session) return false;
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return true;
-  return [session.state, session.status].map(lowerString).some((state) => TERMINAL_SESSION_STATES.has(state));
+  return [session.state, session.status, session.agentState, session.subagentRunState]
+    .map(lowerString)
+    .some((state) => TERMINAL_SESSION_STATES.has(state));
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {

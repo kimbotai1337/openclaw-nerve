@@ -52,6 +52,29 @@ function findNodeByKey(nodes: ReturnType<typeof buildSessionTree>, key: string):
 }
 
 /** Sidebar list of agent sessions with tree structure and context menus. */
+const ACTIVE_SESSION_STATES = new Set(['running', 'busy', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
+const TERMINAL_SESSION_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+
+function lowerString(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function sessionLooksTerminal(session: Session): boolean {
+  const phase = lowerString(session.phase);
+  if (phase === 'end' || phase === 'error') return true;
+  return [session.state, session.status, session.agentState, session.subagentRunState]
+    .map(lowerString)
+    .some((state) => TERMINAL_SESSION_STATES.has(state));
+}
+
+function sessionLooksActive(session: Session): boolean {
+  if (sessionLooksTerminal(session)) return false;
+  if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
+  return [session.state, session.status, session.agentState, session.subagentRunState]
+    .map(lowerString)
+    .some((state) => ACTIVE_SESSION_STATES.has(state));
+}
+
 export function SessionList({ sessions, currentSession, busyState, agentStatus, unreadSessions, onSelect, onRefresh, onDelete, onSpawn, onRename, onAbort, isLoading, agentName = 'Agent', compact = false }: SessionListProps) {
   const [deleteTarget, setDeleteTarget] = useState<{ key: string; label: string; descendantCount: number; isRootAgent: boolean } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -190,7 +213,7 @@ export function SessionList({ sessions, currentSession, busyState, agentStatus, 
           const isRootAgent = isTopLevelAgentSessionKey(sessionKey);
           const label = getSessionDisplayLabel(node.session, agentName);
           const isGrowing = growingSessions[sessionKey] ?? false;
-          const running = busyState[sessionKey] || node.session.state === 'running' || node.session.agentState === 'running' || node.session.busy || node.session.processing || node.session.status === 'running' || node.session.status === 'busy' || (isGrowing && isSubagent);
+          const running = !sessionLooksTerminal(node.session) && (busyState[sessionKey] || sessionLooksActive(node.session) || (isGrowing && isSubagent));
           const isActive = sessionKey === currentSession;
           const currentTokens = node.session.totalTokens || 0;
           const prevTokens = prevTokensRef.current[sessionKey] || 0;

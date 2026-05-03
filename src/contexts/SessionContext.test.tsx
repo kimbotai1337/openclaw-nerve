@@ -197,6 +197,30 @@ describe('SessionContext', () => {
     });
   });
 
+  it('hydrates active run status from busy sessions.list snapshots', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', status: 'busy' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+  });
+
   it('clears active run status from terminal sessions.list snapshots', async () => {
     let terminal = false;
     rpcMock.mockImplementation(async (method: string) => {
@@ -207,6 +231,80 @@ describe('SessionContext', () => {
             terminal
               ? { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, status: 'done' }
               : { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: true, status: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionRefreshProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+
+    terminal = true;
+    await act(async () => {
+      screen.getByTestId('refresh-sessions').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+    });
+  });
+
+  it('clears active run status from terminal agentState sessions.list snapshots', async () => {
+    let terminal = false;
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            terminal
+              ? { sessionKey: 'agent:reviewer:main', label: 'Reviewer', agentState: 'completed' }
+              : { sessionKey: 'agent:reviewer:main', label: 'Reviewer', agentState: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionRefreshProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+
+    terminal = true;
+    await act(async () => {
+      screen.getByTestId('refresh-sessions').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+    });
+  });
+
+  it('preserves phase-only session list changes for terminal refresh snapshots', async () => {
+    let terminal = false;
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            terminal
+              ? { sessionKey: 'agent:reviewer:main', label: 'Reviewer', status: 'running', phase: 'end' }
+              : { sessionKey: 'agent:reviewer:main', label: 'Reviewer', status: 'running', phase: 'start' },
           ],
         };
       }
