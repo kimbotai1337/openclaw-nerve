@@ -21,6 +21,7 @@ import {
 
 const BUSY_STATES = new Set(['running', 'busy', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
 const IDLE_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+const TERMINAL_SESSION_UPDATE_STICKY_MS = 5_000;
 
 function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -137,6 +138,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const toolSeenRef = useRef<Map<string, number>>(new Map());
   const doneTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const delayedRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const terminalSessionUpdatesRef = useRef<Record<string, { updates: Partial<Session>; expiresAt: number }>>({});
 
   // Derive busyState from active granular statuses for backward compatibility.
   const busyState = useMemo(() => {
@@ -525,6 +527,40 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setEventEntries(prev => [{ badge, badgeCls, desc, ts: new Date() }, ...prev].slice(0, 50));
   }, []);
 
+  const rememberSessionEventUpdate = useCallback((sessionKey: string, updates: Partial<Session>) => {
+    if (!sessionKey || Object.keys(updates).length === 0) return;
+    if (sessionSnapshotIsActive(updates)) {
+      delete terminalSessionUpdatesRef.current[sessionKey];
+      return;
+    }
+    if (!sessionSnapshotIsTerminal(updates)) return;
+    terminalSessionUpdatesRef.current[sessionKey] = {
+      updates,
+      expiresAt: Date.now() + TERMINAL_SESSION_UPDATE_STICKY_MS,
+    };
+  }, []);
+
+  const applyRecentTerminalSessionUpdates = useCallback((sessionList: Session[]): Session[] => {
+    const now = Date.now();
+    let changed = false;
+    const next = sessionList.map((session) => {
+      const key = getSessionKey(session);
+      const recent = key ? terminalSessionUpdatesRef.current[key] : undefined;
+      if (!recent) return session;
+      if (recent.expiresAt <= now) {
+        delete terminalSessionUpdatesRef.current[key];
+        return session;
+      }
+      if (sessionSnapshotIsTerminal(session)) {
+        delete terminalSessionUpdatesRef.current[key];
+        return session;
+      }
+      changed = true;
+      return { ...session, ...recent.updates };
+    });
+    return changed ? next : sessionList;
+  }, []);
+
   const feedAgentLog = useCallback((evt: string, p: EventPayload) => {
     const sk = p.sessionKey || '';
     const name = friendlyName(sk);
@@ -616,7 +652,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refreshSessions = useCallback(async () => {
     if (connectionState !== 'connected') return;
     try {
-      const newSessions = await listAuthoritativeSessions();
+      const newSessions = applyRecentTerminalSessionUpdates(await listAuthoritativeSessions());
       const nextCurrentSession = pickDefaultSessionKey(newSessions, currentSessionRef.current);
       
       // Smart diffing: preserve object references for unchanged sessions.
@@ -707,7 +743,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       setSessionsLoading(false);
     }
-  }, [connectionState, listAuthoritativeSessions, markSessionUnread, pingSession, setCurrentSession, setGranularStatus]);
+  }, [connectionState, listAuthoritativeSessions, markSessionUnread, pingSession, setCurrentSession, setGranularStatus, applyRecentTerminalSessionUpdates]);
 
   const refreshSessionsRef = useRef(refreshSessions);
   useEffect(() => {
@@ -716,6 +752,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   // Update session in list from WebSocket event data
   const updateSessionFromEvent = useCallback((sessionKey: string, updates: Partial<Session>) => {
+    rememberSessionEventUpdate(sessionKey, updates);
     setSessions(prev => {
       const idx = prev.findIndex(s => getSessionKey(s) === sessionKey);
       if (idx === -1) {
@@ -742,7 +779,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return { ...s, ...updates, lastActivity: Date.now() };
       });
     });
-  }, []);
+  }, [rememberSessionEventUpdate]);
 
   // Extract session updates (state + token data) from gateway payloads.
   const extractSessionUpdates = useCallback((state: string | undefined, payload: SessionSnapshotLike): Partial<Session> => {
@@ -837,8 +874,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             markSessionUnread(sk);
             pingSession(sk);
           }
-          refreshSessions();
-          if (nextStatus === 'DONE') scheduleDelayedRefresh();
+          scheduleDelayedRefresh();
         }
 
         const updates = extractSessionUpdates(p.state || p.status, p);
@@ -872,7 +908,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 markSessionUnread(sk);
                 pingSession(sk);
               }
-              refreshSessions();
               scheduleDelayedRefresh();
             } else if (phase === 'error') {
               setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
@@ -880,7 +915,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 markSessionUnread(sk);
                 pingSession(sk);
               }
-              refreshSessions();
+              scheduleDelayedRefresh();
             }
           } else if (stream === 'tool' && ap.data) {
             if (ap.data.phase === 'start' && ap.data.name) {
@@ -917,7 +952,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               markSessionUnread(sk);
               pingSession(sk);
             }
-            refreshSessions();
             // Delayed refresh to catch token counts that may not be available immediately.
             scheduleDelayedRefresh();
           } else if (state === 'error') {
@@ -947,8 +981,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               markSessionUnread(sk);
               pingSession(sk);
             }
-            refreshSessions();
-            if (nextStatus === 'DONE') scheduleDelayedRefresh();
+            scheduleDelayedRefresh();
           }
         }
 

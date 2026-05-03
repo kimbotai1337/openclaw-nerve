@@ -101,6 +101,7 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 
 const ACTIVE_SESSION_STATES = new Set(['running', 'busy', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
 const TERMINAL_SESSION_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+const TERMINAL_SNAPSHOT_FINISH_DELAY_MS = 1_500;
 
 function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -160,6 +161,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const lastGatewaySeqRef = useRef<number | null>(null);
   const lastChatSeqRef = useRef<number | null>(null);
   const toolResultRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const terminalSnapshotFinishRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ─── Compose hooks ────────────────────────────────────────────────────────
   const msgHook = useChatMessages({ rpc, currentSessionRef });
@@ -217,8 +219,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [currentSession, sessions],
   );
 
+  const clearTerminalSnapshotFinish = useCallback(() => {
+    if (!terminalSnapshotFinishRef.current) return;
+    clearTimeout(terminalSnapshotFinishRef.current);
+    terminalSnapshotFinishRef.current = null;
+  }, []);
+
   const hydrateActiveSessionRun = useCallback((stateHint?: string) => {
     if (!currentSessionRef.current) return;
+    clearTerminalSnapshotFinish();
     if (isGeneratingRef.current || activeRunIdRef.current) return;
 
     const state = lowerString(stateHint);
@@ -232,9 +241,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     );
     setLastEventTimestamp(Date.now());
     triggerRecovery('reconnect');
-  }, [resetPlayedSounds, setLastEventTimestamp, setProcessingStage, triggerRecovery]);
+  }, [clearTerminalSnapshotFinish, resetPlayedSounds, setLastEventTimestamp, setProcessingStage, triggerRecovery]);
 
   const finishHydratedSessionRun = useCallback((stateHint?: string) => {
+    clearTerminalSnapshotFinish();
     if (!isGeneratingRef.current && !activeRunIdRef.current) return;
     const state = lowerString(stateHint);
 
@@ -252,7 +262,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (state !== 'error' && state !== 'failed') {
       playCompletionPing();
     }
-  }, [clearStreamBuffer, incrementGeneration, playCompletionPing, resetThinking, setActivityLog, setLastEventTimestamp, setProcessingStage]);
+  }, [clearStreamBuffer, clearTerminalSnapshotFinish, incrementGeneration, playCompletionPing, resetThinking, setActivityLog, setLastEventTimestamp, setProcessingStage]);
+
+  const scheduleTerminalSnapshotFinish = useCallback((stateHint?: string) => {
+    const activeRunId = activeRunIdRef.current;
+    if (!activeRunId) {
+      finishHydratedSessionRun(stateHint);
+      return;
+    }
+    clearTerminalSnapshotFinish();
+    terminalSnapshotFinishRef.current = setTimeout(() => {
+      terminalSnapshotFinishRef.current = null;
+      if (activeRunIdRef.current === activeRunId) {
+        finishHydratedSessionRun(stateHint);
+      }
+    }, TERMINAL_SNAPSHOT_FINISH_DELAY_MS);
+  }, [clearTerminalSnapshotFinish, finishHydratedSessionRun]);
 
   // ─── Reset transient state on session switch ──────────────────────────────
   useEffect(() => {
@@ -268,8 +293,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       clearTimeout(toolResultRefreshRef.current);
       toolResultRefreshRef.current = null;
     }
+    clearTerminalSnapshotFinish();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSession]);
+  }, [currentSession, clearTerminalSnapshotFinish]);
+
+  useEffect(() => () => clearTerminalSnapshotFinish(), [clearTerminalSnapshotFinish]);
 
   // ─── Load history on connect / recover on reconnect ───────────────────────
   const previousConnectionStateRef = useRef(connectionState);
@@ -322,13 +350,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (sessionLooksTerminal(currentSessionMeta)) {
       const hasLiveRun = Boolean(activeRunIdRef.current);
       const wasActive = isGeneratingRef.current || hasLiveRun;
-      if (!hasLiveRun) finishHydratedSessionRun(stateHint);
+      scheduleTerminalSnapshotFinish(stateHint);
       if (wasActive) triggerRecovery('reconnect');
       return;
     }
     if (!sessionLooksActive(currentSessionMeta)) return;
     hydrateActiveSessionRun(stateHint);
-  }, [connectionState, currentSession, currentSessionMeta, finishHydratedSessionRun, hydrateActiveSessionRun, triggerRecovery]);
+  }, [connectionState, currentSession, currentSessionMeta, hydrateActiveSessionRun, scheduleTerminalSnapshotFinish, triggerRecovery]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────
   const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;
@@ -408,8 +436,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (activeUpdate) {
           hydrateActiveSessionRun(stateHint);
         }
-        if (terminalUpdate && !activeRunIdRef.current) {
-          finishHydratedSessionRun(stateHint);
+        if (terminalUpdate) {
+          scheduleTerminalSnapshotFinish(stateHint);
         }
         const shouldRecoverFromMessage = msg.event === 'session.message'
           && !activeUpdate
@@ -450,6 +478,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const ap = classified.agentPayload!;
 
         if (type === 'lifecycle_start') {
+          clearTerminalSnapshotFinish();
           setIsGenerating(true);
           setProcessingStage('thinking');
           setLastEventTimestamp(Date.now());
@@ -475,6 +504,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
 
         if (type === 'assistant_stream') {
+          clearTerminalSnapshotFinish();
           setProcessingStage('streaming');
           setLastEventTimestamp(Date.now());
           return;
@@ -488,12 +518,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setLastEventTimestamp(Date.now());
 
         if (type === 'agent_tool_start') {
+          clearTerminalSnapshotFinish();
           setProcessingStage('tool_use');
           addActivityEntry(ap);
           return;
         }
 
         if (type === 'agent_tool_result') {
+          clearTerminalSnapshotFinish();
           const completedId = ap.data?.toolCallId;
           if (completedId) completeActivityEntry(completedId);
 
@@ -545,6 +577,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setLastEventTimestamp(Date.now());
 
       if (type === 'chat_started') {
+        clearTerminalSnapshotFinish();
         activeRunIdRef.current = runId;
         run.startedAt = Date.now();
         run.finalized = false;
@@ -562,6 +595,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (type === 'chat_delta') {
+        clearTerminalSnapshotFinish();
         if (run.finalized) return;
         if (typeof classified.chatSeq === 'number' && prevRunSeq !== null && classified.chatSeq <= prevRunSeq) return;
 
@@ -581,6 +615,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (type === 'chat_final') {
+        clearTerminalSnapshotFinish();
         const isActiveRun = activeRunBefore !== null
           ? activeRunBefore === runId
           : isGeneratingRef.current;
@@ -623,6 +658,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (type === 'chat_aborted') {
+        clearTerminalSnapshotFinish();
         const isActiveRun = activeRunBefore !== null
           ? activeRunBefore === runId
           : isGeneratingRef.current;
@@ -660,6 +696,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (type === 'chat_error') {
+        clearTerminalSnapshotFinish();
         const isActiveRun = activeRunBefore !== null
           ? activeRunBefore === runId
           : isGeneratingRef.current;
@@ -709,8 +746,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     playCompletionPing,
     resetPlayedSounds,
     handleFinalTTS,
+    clearTerminalSnapshotFinish,
     hydrateActiveSessionRun,
-    finishHydratedSessionRun,
+    scheduleTerminalSnapshotFinish,
     subscribe,
     rpc,
   ]);

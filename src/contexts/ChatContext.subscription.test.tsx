@@ -386,6 +386,53 @@ describe('ChatContext subscription stability', () => {
     });
   });
 
+  it('clears active run state from terminal snapshots when the chat final frame is missed', async () => {
+    const { ChatProvider, useChat, subscribedHandlers } = await setup({ connectionState: 'connected' });
+
+    let send: ((text: string, images?: ImageAttachment[]) => Promise<void>) | null = null;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        send = chat.handleSend;
+      }, [chat]);
+      return <div data-testid="is-generating">{String(chat.isGenerating)}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandlers.length).toBe(1));
+    await act(async () => {
+      await send!('hello');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+
+    vi.useFakeTimers();
+
+    act(() => {
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'main', hasActiveRun: false, status: 'done' },
+      });
+    });
+
+    expect(screen.getByTestId('is-generating').textContent).toBe('true');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(screen.getByTestId('is-generating').textContent).toBe('false');
+  });
+
   it('clears hydrated generation state from a terminal agentState refreshed session snapshot', async () => {
     const { ChatProvider, useChat, setSessions } = await setup({
       connectionState: 'connected',
