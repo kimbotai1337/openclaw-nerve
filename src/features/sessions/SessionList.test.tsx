@@ -52,6 +52,16 @@ describe('SessionList active state detection', () => {
 
     expect(screen.getByTitle('Abort session')).toBeInTheDocument();
   });
+
+  it('exposes abort when live busy state overrides a stale terminal snapshot', () => {
+    const sessions: Session[] = [
+      { sessionKey: 'agent:reviewer:main', label: 'Reviewer', phase: 'end', status: 'done' },
+    ];
+
+    renderSessionList({ sessions, busyState: { 'agent:reviewer:main': true }, onAbort: vi.fn() });
+
+    expect(screen.getByTitle('Abort session')).toBeInTheDocument();
+  });
 });
 
 describe('SessionList empty state', () => {

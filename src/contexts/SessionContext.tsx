@@ -745,16 +745,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Extract session updates (state + token data) from gateway payloads.
-  const extractSessionUpdates = useCallback((state: string | undefined, payload: Partial<EventPayload>): Partial<Session> => {
+  const extractSessionUpdates = useCallback((state: string | undefined, payload: SessionSnapshotLike): Partial<Session> => {
     const updates: Partial<Session> = {};
     const phase = lowerString(payload.phase);
     const stateValue = lowerString(state);
+    const explicitChildOnlyActive = payload.hasActiveSubagentRun === true
+      && payload.hasActiveRun !== true
+      && payload.busy !== true
+      && payload.processing !== true;
     const activeLegacyState = Boolean(stateValue)
       && BUSY_STATES.has(stateValue)
       && phase !== 'start'
       && phase !== 'end'
       && phase !== 'error'
-      && !snapshotHasExplicitInactiveRun(payload);
+      && !snapshotHasExplicitInactiveRun(payload)
+      && !explicitChildOnlyActive;
     if (state) updates.state = state;
     if (typeof payload.phase === 'string') updates.phase = payload.phase;
     if (typeof payload.status === 'string') updates.status = payload.status;

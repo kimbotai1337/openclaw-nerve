@@ -231,7 +231,7 @@ export function SessionList({ sessions, currentSession, busyState, agentStatus, 
           const isRootAgent = isTopLevelAgentSessionKey(sessionKey);
           const label = getSessionDisplayLabel(node.session, agentName);
           const isGrowing = growingSessions[sessionKey] ?? false;
-          const running = !sessionLooksTerminal(node.session) && (busyState[sessionKey] || sessionLooksActive(node.session) || (isGrowing && isSubagent));
+          const running = busyState[sessionKey] || (!sessionLooksTerminal(node.session) && (sessionLooksActive(node.session) || (isGrowing && isSubagent)));
           const isActive = sessionKey === currentSession;
           const currentTokens = node.session.totalTokens || 0;
           const prevTokens = prevTokensRef.current[sessionKey] || 0;

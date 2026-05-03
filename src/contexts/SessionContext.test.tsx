@@ -506,6 +506,44 @@ describe('SessionContext', () => {
     });
   });
 
+  it('does not promote child-only active snapshots to an own active run', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, status: 'done', phase: 'end' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('false');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', hasActiveSubagentRun: true, status: 'running' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('false');
+    });
+  });
+
   it('does not let stale running status mask terminal agentState snapshots', async () => {
     let terminal = false;
     rpcMock.mockImplementation(async (method: string) => {
