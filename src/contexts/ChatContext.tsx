@@ -126,7 +126,7 @@ function sessionLooksTerminal(session?: Partial<Session & EventPayload> | null):
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return true;
   if (session.hasActiveRun === true || session.busy === true || session.processing === true) return false;
-  if (session.hasActiveRun === false) return true;
+  if (session.hasActiveRun === false || session.busy === false || session.processing === false) return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => TERMINAL_SESSION_STATES.has(state));

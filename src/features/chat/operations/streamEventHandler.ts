@@ -84,9 +84,10 @@ export function classifyStreamEvent(event: GatewayEvent): ClassifiedEvent | null
       frameSeq: event.seq,
       agentPayload: ap,
     };
+    const stream = evt === 'session.tool' ? (ap.stream || 'tool') : ap.stream;
 
     // Lifecycle events from CLI agents (Codex, Claude Code CLI)
-    if (ap.stream === 'lifecycle') {
+    if (stream === 'lifecycle') {
       const phase = (ap.data as Record<string, unknown> | undefined)?.phase;
       if (phase === 'start') return { ...base, type: 'lifecycle_start' };
       if (phase === 'end' || phase === 'error') return { ...base, type: 'lifecycle_end' };
@@ -94,12 +95,12 @@ export function classifyStreamEvent(event: GatewayEvent): ClassifiedEvent | null
     }
 
     // Assistant stream events from CLI agents
-    if (ap.stream === 'assistant') {
+    if (stream === 'assistant') {
       return { ...base, type: 'assistant_stream' };
     }
 
     // Real-time tool event streaming
-    if (ap.stream === 'tool') {
+    if (stream === 'tool') {
       const data = ap.data;
       if (!data) return { ...base, type: 'ignore' };
       if (data.phase === 'start' && data.name && data.toolCallId) {

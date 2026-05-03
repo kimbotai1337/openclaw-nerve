@@ -255,6 +255,86 @@ describe('ChatContext subscription stability', () => {
     });
   });
 
+  it('clears hydrated generation state from explicit inactive flags with stale running status', async () => {
+    const { ChatProvider, useChat, setSessions } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+
+    setSessions([{ sessionKey: 'main', busy: false, processing: false, status: 'running' }]);
+    rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('NONE');
+  });
+
+  it('clears hydrated generation state from a subscribed explicit inactive snapshot', async () => {
+    const { ChatProvider, useChat, subscribedHandlers } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+    await waitFor(() => expect(subscribedHandlers.length).toBe(1));
+
+    act(() => {
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'main', busy: false, status: 'running' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('NONE');
+  });
+
   it('clears hydrated generation state from a terminal agentState refreshed session snapshot', async () => {
     const { ChatProvider, useChat, setSessions } = await setup({
       connectionState: 'connected',
