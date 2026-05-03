@@ -107,37 +107,43 @@ function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function sessionHasOwnActiveSignal(session: Partial<Session & EventPayload>): boolean {
+  return session.hasActiveRun === true || session.busy === true || session.processing === true;
+}
+
+function sessionHasOwnInactiveSignal(session: Partial<Session & EventPayload>): boolean {
+  return session.hasActiveRun === false || session.busy === false || session.processing === false;
+}
+
+function ownSessionStates(session: Partial<Session & EventPayload>): string[] {
+  return [session.state, session.status, session.agentState].map(lowerString);
+}
+
 function sessionLooksActive(session?: Partial<Session & EventPayload> | null): boolean {
   if (!session) return false;
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return false;
-  if (session.hasActiveRun === true || session.busy === true || session.processing === true) return true;
-  if (session.hasActiveRun === false || session.busy === false || session.processing === false) return false;
+  if (sessionHasOwnActiveSignal(session)) return true;
   if (phase === 'start') return true;
+  if (sessionHasOwnInactiveSignal(session)) return false;
 
-  const ownStateActive = [session.state, session.status, session.agentState]
-    .map(lowerString)
-    .some((state) => ACTIVE_SESSION_STATES.has(state));
+  const ownStateActive = ownSessionStates(session).some((state) => ACTIVE_SESSION_STATES.has(state));
   if (ownStateActive) return true;
 
   // The chat pane should only hydrate the selected session's own run. A parent
   // with only an active child/subagent belongs in the sidebar, not Stop/send UI.
   if (session.hasActiveSubagentRun === true) return false;
-
-  return [session.subagentRunState]
-    .map(lowerString)
-    .some((state) => ACTIVE_SESSION_STATES.has(state));
+  return false;
 }
 
 function sessionLooksTerminal(session?: Partial<Session & EventPayload> | null): boolean {
   if (!session) return false;
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return true;
-  if (session.hasActiveRun === true || session.busy === true || session.processing === true) return false;
-  if (session.hasActiveRun === false || session.busy === false || session.processing === false) return true;
-  return [session.state, session.status, session.agentState, session.subagentRunState]
-    .map(lowerString)
-    .some((state) => TERMINAL_SESSION_STATES.has(state));
+  if (phase === 'start') return false;
+  if (sessionHasOwnActiveSignal(session)) return false;
+  if (sessionHasOwnInactiveSignal(session)) return true;
+  return ownSessionStates(session).some((state) => TERMINAL_SESSION_STATES.has(state));
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
@@ -287,6 +293,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ─── Reset transient state on session switch ──────────────────────────────
   useEffect(() => {
+    isGeneratingRef.current = false;
     setIsGenerating(false);
     msgHook.resetMessageState();
     streamHook.resetStreamState();
@@ -352,7 +359,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // looking idle until the final transcript lands.
   useEffect(() => {
     if (connectionState !== 'connected' || !currentSession) return;
-    const stateHint = currentSessionMeta?.state || currentSessionMeta?.status || currentSessionMeta?.agentState || currentSessionMeta?.subagentRunState || currentSessionMeta?.phase;
+    const stateHint = currentSessionMeta?.state || currentSessionMeta?.status || currentSessionMeta?.agentState || currentSessionMeta?.phase;
     if (sessionLooksTerminal(currentSessionMeta)) {
       const hasLiveRun = Boolean(activeRunIdRef.current);
       const wasActive = isGeneratingRef.current || hasLiveRun;
@@ -436,7 +443,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const payload = (msg.payload || {}) as EventPayload;
 
       if ((msg.event === 'sessions.changed' || msg.event === 'session.message') && payload.sessionKey === currentSk) {
-        const stateHint = payload.state || payload.status || payload.agentState || payload.subagentRunState || payload.phase;
+        const stateHint = payload.state || payload.status || payload.agentState || payload.phase;
         const terminalUpdate = sessionLooksTerminal(payload);
         const activeUpdate = sessionLooksActive(payload);
         if (activeUpdate) {

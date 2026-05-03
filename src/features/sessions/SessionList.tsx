@@ -72,24 +72,31 @@ function sessionHasExplicitInactiveRun(session: Session): boolean {
     || session.processing === false;
 }
 
+function ownSessionStates(session: Session): string[] {
+  return [session.state, session.status, session.agentState].map(lowerString);
+}
+
 function sessionLooksTerminal(session: Session): boolean {
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return true;
+  if (phase === 'start') return false;
   if (sessionHasExplicitActiveRun(session)) return false;
   if (sessionHasExplicitInactiveRun(session)) return true;
-  return [session.state, session.status, session.agentState, session.subagentRunState]
-    .map(lowerString)
-    .some((state) => TERMINAL_SESSION_STATES.has(state));
+
+  const ownStates = ownSessionStates(session);
+  if (ownStates.some((state) => TERMINAL_SESSION_STATES.has(state))) return true;
+  if (ownStates.some((state) => ACTIVE_SESSION_STATES.has(state))) return false;
+  return TERMINAL_SESSION_STATES.has(lowerString(session.subagentRunState));
 }
 
 function sessionLooksActive(session: Session): boolean {
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return false;
   if (sessionHasExplicitActiveRun(session)) return true;
+  if (phase === 'start') return true;
   if (sessionHasExplicitInactiveRun(session)) return false;
   if (sessionLooksTerminal(session)) return false;
-  return [session.state, session.status, session.agentState, session.subagentRunState]
-    .map(lowerString)
+  return [...ownSessionStates(session), lowerString(session.subagentRunState)]
     .some((state) => ACTIVE_SESSION_STATES.has(state));
 }
 

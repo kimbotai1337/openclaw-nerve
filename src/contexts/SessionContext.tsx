@@ -42,39 +42,45 @@ function snapshotHasExplicitInactiveRun(snapshot: SessionSnapshotLike): boolean 
     || snapshot.processing === false;
 }
 
+function ownSnapshotStates(snapshot: SessionSnapshotLike): string[] {
+  return [snapshot.state, snapshot.status, snapshot.agentState].map(lowerString);
+}
+
 function sessionSnapshotIsActive(session: SessionSnapshotLike): boolean {
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return false;
   if (snapshotHasExplicitActiveRun(session)) return true;
-  if (snapshotHasExplicitInactiveRun(session)) return false;
   if (phase === 'start') return true;
-  return [session.state, session.status, session.agentState, session.subagentRunState]
-    .map(lowerString)
+  if (snapshotHasExplicitInactiveRun(session)) return false;
+  return [...ownSnapshotStates(session), lowerString(session.subagentRunState)]
     .some((state) => BUSY_STATES.has(state));
 }
 
 function sessionSnapshotIsTerminal(snapshot: SessionSnapshotLike): boolean {
   const phase = lowerString(snapshot.phase);
   if (phase === 'end' || phase === 'error') return true;
+  if (phase === 'start') return false;
   if (snapshotHasExplicitActiveRun(snapshot)) return false;
   if (snapshotHasExplicitInactiveRun(snapshot)) return true;
-  return [snapshot.state, snapshot.status, snapshot.agentState, snapshot.subagentRunState]
-    .map(lowerString)
-    .some((state) => IDLE_STATES.has(state));
+
+  const ownStates = ownSnapshotStates(snapshot);
+  if (ownStates.some((state) => IDLE_STATES.has(state))) return true;
+  if (ownStates.some((state) => BUSY_STATES.has(state))) return false;
+  return IDLE_STATES.has(lowerString(snapshot.subagentRunState));
 }
 
 function terminalAgentStatus(snapshot: SessionSnapshotLike): GranularAgentState['status'] {
   const phase = lowerString(snapshot.phase);
-  const states = [
-    snapshot.status,
-    snapshot.state,
-    snapshot.agentState,
-    snapshot.subagentRunState,
-  ].map(lowerString);
-  if (phase === 'error' || states.some((state) => state === 'error' || state === 'failed' || state === 'timeout')) return 'ERROR';
-  if (states.some((state) => state === 'idle' || state === 'aborted' || state === 'cancelled' || state === 'killed' || state === 'stopped')) return 'IDLE';
-  if (states.some((state) => state === 'done' || state === 'final' || state === 'completed' || state === 'finished' || state === 'ended')) return 'DONE';
+  const ownStates = ownSnapshotStates(snapshot);
+  if (phase === 'error' || ownStates.some((state) => state === 'error' || state === 'failed' || state === 'timeout')) return 'ERROR';
+  if (ownStates.some((state) => state === 'idle' || state === 'aborted' || state === 'cancelled' || state === 'killed' || state === 'stopped')) return 'IDLE';
+  if (ownStates.some((state) => state === 'done' || state === 'final' || state === 'completed' || state === 'finished' || state === 'ended')) return 'DONE';
   if (snapshotHasExplicitInactiveRun(snapshot)) return 'IDLE';
+
+  const childState = lowerString(snapshot.subagentRunState);
+  if (childState === 'error' || childState === 'failed' || childState === 'timeout') return 'ERROR';
+  if (childState === 'idle' || childState === 'aborted' || childState === 'cancelled' || childState === 'killed' || childState === 'stopped') return 'IDLE';
+  if (childState === 'done' || childState === 'final' || childState === 'completed' || childState === 'finished' || childState === 'ended') return 'DONE';
   return 'DONE';
 }
 
@@ -681,6 +687,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             existing.status !== newSession.status ||
             existing.phase !== newSession.phase ||
             existing.agentState !== newSession.agentState ||
+            existing.busy !== newSession.busy ||
+            existing.processing !== newSession.processing ||
             existing.hasActiveRun !== newSession.hasActiveRun ||
             existing.hasActiveSubagentRun !== newSession.hasActiveSubagentRun ||
             existing.subagentRunState !== newSession.subagentRunState ||
@@ -801,6 +809,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (typeof payload.phase === 'string') updates.phase = payload.phase;
     if (typeof payload.status === 'string') updates.status = payload.status;
     if (typeof payload.agentState === 'string') updates.agentState = payload.agentState;
+    if (typeof payload.busy === 'boolean') updates.busy = payload.busy;
+    if (typeof payload.processing === 'boolean') updates.processing = payload.processing;
     if (typeof payload.hasActiveRun === 'boolean') updates.hasActiveRun = payload.hasActiveRun;
     if (typeof payload.hasActiveSubagentRun === 'boolean') updates.hasActiveSubagentRun = payload.hasActiveSubagentRun;
     if (typeof payload.subagentRunState === 'string') updates.subagentRunState = payload.subagentRunState;
@@ -816,11 +826,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // arrive after a terminal phase-only snapshot. Clear stale terminal
       // strings/flags so cached snapshots don't look ended until refresh.
       if (activeLegacyState && typeof payload.phase !== 'string') updates.phase = undefined;
-      if (!state) updates.state = 'running';
-      if (typeof payload.status !== 'string') updates.status = 'running';
+      if (!state || IDLE_STATES.has(stateValue)) updates.state = 'running';
+      if (typeof payload.status !== 'string' || IDLE_STATES.has(lowerString(payload.status))) updates.status = 'running';
+      if (payload.busy !== true) updates.busy = undefined;
+      if (payload.processing !== true) updates.processing = undefined;
+    } else if (phase === 'end' || phase === 'error') {
+      updates.hasActiveRun = false;
+    } else if (sessionSnapshotIsTerminal(payload)) {
+      updates.hasActiveRun = false;
     }
-    if (phase === 'end' || phase === 'error') updates.hasActiveRun = false;
-    if (sessionSnapshotIsTerminal(payload)) updates.hasActiveRun = false;
 
     return updates;
   }, []);

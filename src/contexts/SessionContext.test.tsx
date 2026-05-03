@@ -100,6 +100,8 @@ function SessionSnapshotProbe() {
       <div data-testid="reviewer-phase">{session?.phase ?? 'NONE'}</div>
       <div data-testid="reviewer-snapshot-status">{session?.status ?? 'NONE'}</div>
       <div data-testid="reviewer-active-run">{String(session?.hasActiveRun)}</div>
+      <div data-testid="reviewer-busy-flag">{String(session?.busy)}</div>
+      <div data-testid="reviewer-processing-flag">{String(session?.processing)}</div>
     </div>
   );
 }
@@ -676,6 +678,192 @@ describe('SessionContext', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+    });
+  });
+
+  it('keeps own active sessions running when a child terminal state is present in sessions.list', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', status: 'running', subagentRunState: 'done' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+  });
+
+  it('keeps own active sessions running when a subscribed snapshot includes a child terminal state', async () => {
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandler).toBeTruthy());
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', hasActiveRun: true, status: 'running' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', status: 'running', subagentRunState: 'done' },
+      });
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+  });
+
+  it('updates busy and processing fields from sessions.list refreshes', async () => {
+    let terminal = false;
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            terminal
+              ? { sessionKey: 'agent:reviewer:main', label: 'Reviewer', busy: false, processing: false, status: 'running' }
+              : { sessionKey: 'agent:reviewer:main', label: 'Reviewer', busy: true, processing: true, status: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+        <SessionRefreshProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-busy-flag').textContent).toBe('true');
+      expect(screen.getByTestId('reviewer-processing-flag').textContent).toBe('true');
+    });
+
+    terminal = true;
+    await act(async () => {
+      screen.getByTestId('refresh-sessions').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+      expect(screen.getByTestId('reviewer-busy-flag').textContent).toBe('false');
+      expect(screen.getByTestId('reviewer-processing-flag').textContent).toBe('false');
+    });
+  });
+
+  it('persists busy and processing fields from subscribed session snapshots', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', busy: true, processing: true, status: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-busy-flag').textContent).toBe('true');
+      expect(screen.getByTestId('reviewer-processing-flag').textContent).toBe('true');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', busy: false, processing: false, status: 'running' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+      expect(screen.getByTestId('reviewer-busy-flag').textContent).toBe('false');
+      expect(screen.getByTestId('reviewer-processing-flag').textContent).toBe('false');
+    });
+  });
+
+  it('hydrates phase-start snapshots even when stale inactive flags are present', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, busy: false, processing: false, status: 'done', phase: 'end' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandler).toBeTruthy());
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          phase: 'start',
+          hasActiveRun: false,
+          busy: false,
+          processing: false,
+          status: 'done',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-phase').textContent).toBe('start');
+      expect(screen.getByTestId('reviewer-snapshot-status').textContent).toBe('running');
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('true');
+      expect(screen.getByTestId('reviewer-busy-flag').textContent).toBe('undefined');
+      expect(screen.getByTestId('reviewer-processing-flag').textContent).toBe('undefined');
     });
   });
 
