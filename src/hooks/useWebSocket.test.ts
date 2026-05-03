@@ -55,6 +55,24 @@ function getConnectRequest(ws: MockWebSocket): Record<string, unknown> | null {
   return JSON.parse(connectReq) as Record<string, unknown>;
 }
 
+function simulateAuthHandshake(ws: MockWebSocket, nonce = 'test-nonce') {
+  ws.simulateMessage({
+    type: 'event',
+    event: 'connect.challenge',
+    payload: { nonce },
+  });
+
+  const connectReq = getConnectRequest(ws);
+  expect(connectReq).toBeTruthy();
+
+  ws.simulateMessage({
+    type: 'res',
+    id: connectReq?.id,
+    ok: true,
+    payload: { sessionId: 'test-session' },
+  });
+}
+
 describe('useWebSocket', () => {
   let originalWebSocket: typeof WebSocket;
 
@@ -77,11 +95,66 @@ describe('useWebSocket', () => {
       expect(result.current.connectionState).toBe('disconnected');
     });
 
+    it('rejects the initial connect promise if the socket closes before handshake completes', async () => {
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      const { result } = renderHook(() => useWebSocket());
+
+      let connectError: Error | null = null;
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+          connectError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      act(() => {
+        wsInstances[0].close();
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(connectError?.message).toBe('WebSocket disconnected before connect completed');
+      expect(result.current.connectionState).toBe('disconnected');
+    });
+
+    it('times out the initial connect attempt instead of hanging forever', async () => {
+      const { result } = renderHook(() => useWebSocket());
+
+      let connectError: Error | null = null;
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+          connectError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10001);
+        await vi.runAllTimersAsync();
+      });
+
+      expect(connectError?.message).toBe('Connection timed out');
+      expect(result.current.connectionState).toBe('disconnected');
+      expect(result.current.connectError).toBe('Connection timed out — retry');
+    });
+
     it('should transition to connecting state when connect is called', async () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       expect(result.current.connectionState).toBe('connecting');
@@ -91,7 +164,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -124,11 +197,11 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       const ws = wsInstances[0];
@@ -156,11 +229,11 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       const ws = wsInstances[0];
@@ -189,7 +262,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -270,7 +343,7 @@ describe('useWebSocket', () => {
       
       // Initial connection
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -311,7 +384,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -345,7 +418,7 @@ describe('useWebSocket', () => {
       expect(result.current.reconnectAttempt).toBe(0);
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       expect(result.current.reconnectAttempt).toBe(0);
@@ -370,7 +443,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -434,11 +507,15 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      act(() => {
+        simulateAuthHandshake(wsInstances[0]);
       });
 
       let rpcError: Error | null = null;
@@ -486,11 +563,11 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       act(() => {
@@ -498,7 +575,7 @@ describe('useWebSocket', () => {
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       const ws = wsInstances[0];
@@ -523,7 +600,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('wss://secure.example.com', 'token');
+        result.current.connect('wss://secure.example.com', 'token').catch(() => {});
       });
 
       expect(result.current.connectionState).toBe('connecting');
@@ -534,7 +611,7 @@ describe('useWebSocket', () => {
       
       expect(() => {
         act(() => {
-          result.current.connect('ws://localhost:8080', 'test-token');
+          result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
         });
       }).not.toThrow();
     });
