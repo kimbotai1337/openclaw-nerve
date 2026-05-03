@@ -100,7 +100,7 @@ interface ChatContextValue {
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 const ACTIVE_SESSION_STATES = new Set(['running', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
-const TERMINAL_SESSION_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+const TERMINAL_SESSION_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
 
 function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -115,8 +115,10 @@ function sessionLooksActive(session?: Partial<Session & EventPayload> | null): b
     .some((state) => ACTIVE_SESSION_STATES.has(state));
 }
 
-function sessionLooksTerminal(session?: Partial<EventPayload> | Partial<Session> | null): boolean {
+function sessionLooksTerminal(session?: Partial<Session & EventPayload> | null): boolean {
   if (!session) return false;
+  const phase = lowerString(session.phase);
+  if (phase === 'end' || phase === 'error') return true;
   return [session.state, session.status].map(lowerString).some((state) => TERMINAL_SESSION_STATES.has(state));
 }
 
@@ -221,6 +223,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setLastEventTimestamp(Date.now());
     triggerRecovery('reconnect');
   }, [resetPlayedSounds, setLastEventTimestamp, setProcessingStage, triggerRecovery]);
+
+  const finishHydratedSessionRun = useCallback((stateHint?: string) => {
+    if (!isGeneratingRef.current && !activeRunIdRef.current) return;
+    const state = lowerString(stateHint);
+
+    isGeneratingRef.current = false;
+    setIsGenerating(false);
+    activeRunIdRef.current = null;
+    incrementGeneration();
+    setProcessingStage(null);
+    setActivityLog([]);
+    setLastEventTimestamp(0);
+    clearStreamBuffer();
+    resetThinking();
+    pruneRunRegistry(runsRef.current, activeRunIdRef.current);
+
+    if (state !== 'error' && state !== 'failed') {
+      playCompletionPing();
+    }
+  }, [clearStreamBuffer, incrementGeneration, playCompletionPing, resetThinking, setActivityLog, setLastEventTimestamp, setProcessingStage]);
 
   // ─── Reset transient state on session switch ──────────────────────────────
   useEffect(() => {
@@ -365,10 +387,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       if ((msg.event === 'sessions.changed' || msg.event === 'session.message') && payload.sessionKey === currentSk) {
         const stateHint = payload.state || payload.status || payload.phase;
+        const terminalUpdate = sessionLooksTerminal(payload);
         if (sessionLooksActive(payload)) {
           hydrateActiveSessionRun(stateHint);
         }
-        if (msg.event === 'session.message' || sessionLooksTerminal(payload)) {
+        if (terminalUpdate) {
+          finishHydratedSessionRun(stateHint);
+        }
+        if (msg.event === 'session.message' || terminalUpdate) {
           triggerRecoveryOnce('reconnect');
         }
       }
@@ -663,6 +689,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     resetPlayedSounds,
     handleFinalTTS,
     hydrateActiveSessionRun,
+    finishHydratedSessionRun,
     subscribe,
     rpc,
   ]);

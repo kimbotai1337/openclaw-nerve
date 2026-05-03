@@ -20,7 +20,7 @@ import {
 } from '@/features/sessions/sessionKeys';
 
 const BUSY_STATES = new Set(['running', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
-const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+const IDLE_STATES = new Set(['idle', 'done', 'error', 'failed', 'killed', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
 
 function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';

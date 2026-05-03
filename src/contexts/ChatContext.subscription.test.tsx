@@ -173,4 +173,45 @@ describe('ChatContext subscription stability', () => {
     });
     expect(screen.getByTestId('processing-stage').textContent).toBe('thinking');
   });
+
+  it('clears hydrated generation state from a subscribed terminal lifecycle event', async () => {
+    const { ChatProvider, useChat, subscribedHandlers } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+    await waitFor(() => expect(subscribedHandlers.length).toBe(1));
+
+    act(() => {
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'main', phase: 'end', status: 'done' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('NONE');
+  });
 });
