@@ -492,6 +492,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         if (type === 'lifecycle_start') {
           clearTerminalSnapshotFinish();
+          isGeneratingRef.current = true;
           setIsGenerating(true);
           setProcessingStage('thinking');
           setLastEventTimestamp(Date.now());
@@ -499,6 +500,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
 
         if (type === 'lifecycle_end') {
+          isGeneratingRef.current = false;
           setIsGenerating(false);
           setProcessingStage(null);
           setActivityLog([]);
@@ -525,6 +527,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         const agentState = ap.state || ap.agentState;
         if (!isGeneratingRef.current && agentState && isActiveAgentState(agentState)) {
+          isGeneratingRef.current = true;
           setIsGenerating(true);
         }
 
@@ -599,6 +602,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         run.bufferRaw = '';
         run.bufferText = '';
 
+        isGeneratingRef.current = true;
         setIsGenerating(true);
         resetPlayedSounds();
         setProcessingStage('thinking');
@@ -612,7 +616,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (run.finalized) return;
         if (typeof classified.chatSeq === 'number' && prevRunSeq !== null && classified.chatSeq <= prevRunSeq) return;
 
-        if (!isGeneratingRef.current) setIsGenerating(true);
+        if (!isGeneratingRef.current) {
+          isGeneratingRef.current = true;
+          setIsGenerating(true);
+        }
         if (!activeRunIdRef.current) activeRunIdRef.current = runId;
 
         captureThinkingDuration();
@@ -643,6 +650,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         incrementGeneration();
 
         if (isActiveRun) {
+          isGeneratingRef.current = false;
           setIsGenerating(false);
           setProcessingStage(null);
           setActivityLog([]);
@@ -695,6 +703,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
 
         if (isActiveRun) {
+          isGeneratingRef.current = false;
           setIsGenerating(false);
           setProcessingStage(null);
           setActivityLog([]);
@@ -724,6 +733,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         incrementGeneration();
 
         if (isActiveRun) {
+          isGeneratingRef.current = false;
           setIsGenerating(false);
           setProcessingStage(null);
           setActivityLog([]);
@@ -777,6 +787,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Optimistic insert (functional updater to avoid read-then-write race)
     msgHook.setAllMessages(prev => [...prev, userMsg]);
     msgHook.setMessages((prev: ChatMsg[]) => [...prev, userMsg]);
+    isGeneratingRef.current = true;
     setIsGenerating(true);
     streamHook.setStream((prev: ChatStreamState) => ({ ...prev, html: '', runId: undefined }));
     setProcessingStage('thinking');
@@ -820,6 +831,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       };
       msgHook.setAllMessages(prev => [...prev, errMsgBubble]);
       msgHook.setMessages((prev: ChatMsg[]) => [...prev, errMsgBubble]);
+      isGeneratingRef.current = false;
       setIsGenerating(false);
     }
   }, [rpc, msgHook, streamHook, ttsHook, incrementGeneration, setProcessingStage, startThinking]);

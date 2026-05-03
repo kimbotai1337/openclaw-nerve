@@ -95,6 +95,91 @@ describe('ChatContext subscription stability', () => {
     expect(subscribeMock).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the previous final assistant bubble when a new send receives an immediate session.message echo', async () => {
+    const { ChatProvider, useChat, rpcMock, subscribedHandlers } = await setup({ connectionState: 'connected' });
+
+    let send: ((text: string, images?: ImageAttachment[]) => Promise<void>) | null = null;
+    let sendCount = 0;
+    let historyIsStale = false;
+    let resolveSecondSend: ((value: { runId: string; status: 'started' }) => void) | null = null;
+
+    rpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.send') {
+        sendCount += 1;
+        if (sendCount === 1) return Promise.resolve({ runId: 'run-1', status: 'started' });
+        return new Promise((resolve) => {
+          resolveSecondSend = resolve as (value: { runId: string; status: 'started' }) => void;
+        });
+      }
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: historyIsStale
+            ? [{ role: 'user', content: 'old question', timestamp: Date.now() - 10_000 }]
+            : [],
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        send = chat.handleSend;
+      }, [chat]);
+      return <div data-testid="messages">{chat.messages.map((m) => m.rawText || m.html).join('\n')}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandlers.length).toBe(1));
+    await waitFor(() => expect(send).not.toBeNull());
+
+    await act(async () => {
+      await send!('old question');
+    });
+
+    act(() => {
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'chat',
+        payload: { sessionKey: 'main', runId: 'run-1', state: 'final', message: 'previous answer' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('messages').textContent).toContain('previous answer');
+    });
+
+    historyIsStale = true;
+    vi.useFakeTimers();
+
+    let secondSend: Promise<void> | null = null;
+    act(() => {
+      secondSend = send!('next question');
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'session.message',
+        payload: { sessionKey: 'main', message: { role: 'user', content: 'next question' } },
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(screen.getByTestId('messages').textContent).toContain('previous answer');
+    expect(screen.getByTestId('messages').textContent).toContain('next question');
+
+    await act(async () => {
+      resolveSecondSend?.({ runId: 'run-2', status: 'started' });
+      await secondSend;
+    });
+  });
+
   it('subscribes to current session message broadcasts while connected and cleans up', async () => {
     const { ChatProvider, rpcMock } = await setup({ connectionState: 'connected' });
 
