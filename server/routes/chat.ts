@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { gatewayRpcCall } from '../lib/gateway-rpc.js';
 import { chatLedger, type ChatLedgerRecord } from '../lib/chat-ledger.js';
+import { buildChatSnapshot } from '../lib/chat-projector.js';
 
 const app = new Hono();
 
@@ -27,24 +28,13 @@ async function readJsonObject(c: { req: { json: () => Promise<unknown> } }): Pro
     : {};
 }
 
-async function buildSnapshot(sessionKey: string, cursor: number, limit: number) {
-  const history = await gatewayRpcCall('chat.history', { sessionKey, limit });
-  const replay = chatLedger.replay(sessionKey, cursor);
-  return {
-    sessionKey,
-    history,
-    events: replay.events,
-    cursor: replay.cursor,
-  };
-}
-
 app.get('/api/chat/sessions/:sessionKey/snapshot', async (c) => {
   const sessionKey = decodeURIComponent(c.req.param('sessionKey'));
   const limit = parsePositiveInt(c.req.query('limit'), 500, 1000);
   const cursor = parseCursor(c.req.query('cursor'));
 
   try {
-    return c.json(await buildSnapshot(sessionKey, cursor, limit));
+    return c.json(await buildChatSnapshot({ sessionKey, cursor, limit }));
   } catch (error) {
     return c.json({ ok: false, error: errorMessage(error) }, 502);
   }
@@ -104,7 +94,7 @@ app.post('/api/chat/refresh', async (c) => {
   const limit = typeof body.limit === 'number' ? Math.min(Math.max(Math.floor(body.limit), 1), 1000) : 500;
 
   try {
-    return c.json(await buildSnapshot(sessionKey, cursor, limit));
+    return c.json(await buildChatSnapshot({ sessionKey, cursor, limit }));
   } catch (error) {
     return c.json({ ok: false, error: errorMessage(error) }, 502);
   }
