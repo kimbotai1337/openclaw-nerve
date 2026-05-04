@@ -76,6 +76,7 @@ describe('chat timeline reducer', () => {
         runId: 'run-tool',
         seq: 1,
         stream: 'tool',
+        ts: 1_000,
         data: { phase: 'start', toolCallId: 'tool-1', name: 'exec', args: { cmd: 'pwd' } },
       },
     };
@@ -88,6 +89,7 @@ describe('chat timeline reducer', () => {
         runId: 'run-tool',
         seq: 2,
         stream: 'tool',
+        ts: 2_000,
         data: { phase: 'result', toolCallId: 'tool-1' },
       },
     };
@@ -101,6 +103,8 @@ describe('chat timeline reducer', () => {
     expect(tool.rawText).toContain('exec');
     expect(tool.rawText).toContain('pwd');
     expect(state.items[0].status).toBe('completed');
+    expect(state.items[0].timestamp).toBe(2_000);
+    expect(state.items[0].chatMsg.timestamp.getTime()).toBe(2_000);
   });
 
   it('groups consecutive live tool calls from the same run into one bubble', () => {
@@ -559,6 +563,50 @@ describe('chat timeline reducer', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].role).toBe('tool');
     expect(messages[0].toolGroup).toHaveLength(2);
+  });
+
+  it('deduplicates history tool bubbles when the preceding prompt has the same timestamp', () => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'prompt', timestamp: 2_000 },
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'tool_started',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      toolCallId: 'tool-1',
+      name: 'exec',
+      args: { command: 'true' },
+      description: 'exec true',
+      timestamp: 2_500,
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'prompt', timestamp: 2_000 },
+        {
+          role: 'assistant',
+          timestamp: 2_000,
+          content: [
+            { type: 'toolCall', name: 'exec', arguments: { command: 'true' } },
+          ],
+        },
+      ],
+    });
+
+    const messages = selectTimelineMessages(state);
+    expect(messages.map((m) => m.role)).toEqual(['user', 'tool']);
+    expect(messages.filter((m) => m.role === 'tool')).toHaveLength(1);
   });
 
   it('keeps repeated live tool calls when a later user prompt separates them from history', () => {

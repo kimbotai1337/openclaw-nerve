@@ -222,4 +222,120 @@ describe('MockGateway modern OpenClaw protocol support', () => {
       },
     });
   });
+
+  it('keeps sessions.list aligned with active helper-stream state', async () => {
+    const gateway = await createGateway();
+    const ws = await connectClient(gateway);
+
+    let deltaEvent = nextJson(ws);
+    gateway.sendChatDelta({
+      sessionKey: 'agent:test:main',
+      runId: 'run-1',
+      text: 'Streaming',
+    });
+    await expect(deltaEvent).resolves.toMatchObject({ event: 'chat' });
+
+    let sessionsResponse = nextJson(ws);
+    sendRpc(ws, 'sessions-running-after-delta', 'sessions.list');
+    await expect(sessionsResponse).resolves.toMatchObject({
+      payload: {
+        sessions: [
+          expect.objectContaining({
+            sessionKey: 'agent:test:main',
+            state: 'running',
+            busy: true,
+          }),
+        ],
+      },
+    });
+
+    const finalEvent = nextJson(ws);
+    gateway.sendChatFinal({
+      sessionKey: 'agent:test:main',
+      runId: 'run-1',
+      text: 'Done',
+    });
+    await expect(finalEvent).resolves.toMatchObject({ event: 'chat' });
+
+    sessionsResponse = nextJson(ws);
+    sendRpc(ws, 'sessions-idle-after-final', 'sessions.list');
+    await expect(sessionsResponse).resolves.toMatchObject({
+      payload: {
+        sessions: [
+          expect.objectContaining({
+            sessionKey: 'agent:test:main',
+            state: 'idle',
+            busy: false,
+          }),
+        ],
+      },
+    });
+
+    const lifecycleStart = nextJson(ws);
+    gateway.sendAgentLifecycle({
+      sessionKey: 'agent:test:main',
+      runId: 'run-2',
+      phase: 'start',
+    });
+    await expect(lifecycleStart).resolves.toMatchObject({ event: 'agent' });
+
+    sessionsResponse = nextJson(ws);
+    sendRpc(ws, 'sessions-running-after-lifecycle', 'sessions.list');
+    await expect(sessionsResponse).resolves.toMatchObject({
+      payload: {
+        sessions: [
+          expect.objectContaining({
+            sessionKey: 'agent:test:main',
+            state: 'running',
+            busy: true,
+          }),
+        ],
+      },
+    });
+
+    deltaEvent = nextJson(ws);
+    gateway.sendAgentToolStart({
+      sessionKey: 'agent:test:main',
+      runId: 'run-2',
+      toolCallId: 'tool-1',
+      name: 'exec',
+    });
+    await expect(deltaEvent).resolves.toMatchObject({ event: 'agent' });
+
+    sessionsResponse = nextJson(ws);
+    sendRpc(ws, 'sessions-running-after-tool', 'sessions.list');
+    await expect(sessionsResponse).resolves.toMatchObject({
+      payload: {
+        sessions: [
+          expect.objectContaining({
+            sessionKey: 'agent:test:main',
+            state: 'running',
+            busy: true,
+          }),
+        ],
+      },
+    });
+
+    const lifecycleEnd = nextJson(ws);
+    gateway.sendAgentLifecycle({
+      sessionKey: 'agent:test:main',
+      runId: 'run-2',
+      phase: 'end',
+    });
+    await expect(lifecycleEnd).resolves.toMatchObject({ event: 'agent' });
+
+    sessionsResponse = nextJson(ws);
+    sendRpc(ws, 'sessions-idle-after-lifecycle', 'sessions.list');
+    await expect(sessionsResponse).resolves.toMatchObject({
+      payload: {
+        sessions: [
+          expect.objectContaining({
+            sessionKey: 'agent:test:main',
+            state: 'idle',
+            busy: false,
+          }),
+        ],
+      },
+    });
+  });
 });

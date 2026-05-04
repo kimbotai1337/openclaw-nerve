@@ -173,6 +173,25 @@ describe('config module', () => {
       warnSpy.mockRestore();
       logSpy.mockRestore();
     });
+
+    it('uses the configured gateway health timeout', async () => {
+      vi.resetModules();
+      process.env.NERVE_GATEWAY_HEALTH_TIMEOUT_MS = '1234';
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        const { probeGateway } = await import('./config.js');
+        await probeGateway();
+
+        expect(timeoutSpy).toHaveBeenCalledWith(1234);
+      } finally {
+        globalThis.fetch = originalFetch;
+        logSpy.mockRestore();
+      }
+    });
   });
 
   describe('config type coercion', () => {

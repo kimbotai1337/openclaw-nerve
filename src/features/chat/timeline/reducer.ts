@@ -194,7 +194,7 @@ function hasInterveningUserMessage(
     if (existing.kind !== 'user_message') return false;
     if (candidate.timestamp <= item.timestamp) {
       if (existing.timestamp > candidate.timestamp && existing.timestamp <= item.timestamp) return true;
-      return existing.timestamp === candidate.timestamp && index > candidateIndex;
+      return candidateIndex >= 0 && existing.timestamp === candidate.timestamp && index > candidateIndex;
     }
     return existing.timestamp >= item.timestamp && existing.timestamp < candidate.timestamp;
   });
@@ -483,10 +483,15 @@ export function reduceTimelineEvent(
     const id = liveToolItemId(event.sessionKey, event.runId, event.toolCallId);
     const existingIndex = next.items.findIndex((item) => item.id === id);
     if (existingIndex >= 0) {
+      const completedAt = nowOr(event.timestamp);
       next.items[existingIndex] = {
         ...next.items[existingIndex],
         status: 'completed',
-        timestamp: nowOr(event.timestamp),
+        timestamp: completedAt,
+        chatMsg: {
+          ...next.items[existingIndex].chatMsg,
+          timestamp: new Date(completedAt),
+        },
       };
     }
     return upsertRun(next, event, 'active');

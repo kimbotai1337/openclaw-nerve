@@ -305,6 +305,7 @@ export class MockGateway {
     seq?: number;
     timestamp?: number;
   }): void {
+    this.ensureSession(params.sessionKey, { state: 'running', busy: true });
     this.broadcastGatewayEvent('chat', {
       sessionKey: params.sessionKey,
       runId: params.runId,
@@ -358,6 +359,7 @@ export class MockGateway {
     seq?: number;
     timestamp?: number;
   }): void {
+    this.ensureSession(params.sessionKey, { state: 'running', busy: true });
     this.broadcastGatewayEvent('agent', {
       sessionKey: params.sessionKey,
       runId: params.runId,
@@ -381,6 +383,7 @@ export class MockGateway {
     seq?: number;
     timestamp?: number;
   }): void {
+    this.ensureSession(params.sessionKey, { state: 'running', busy: true });
     this.broadcastGatewayEvent('agent', {
       sessionKey: params.sessionKey,
       runId: params.runId,
@@ -402,6 +405,12 @@ export class MockGateway {
     seq?: number;
     timestamp?: number;
   }): void {
+    this.ensureSession(
+      params.sessionKey,
+      params.phase === 'start'
+        ? { state: 'running', busy: true }
+        : { state: 'idle', busy: false },
+    );
     this.broadcastGatewayEvent('agent', {
       sessionKey: params.sessionKey,
       runId: params.runId,

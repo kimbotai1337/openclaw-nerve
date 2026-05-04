@@ -895,7 +895,7 @@ describe('SessionContext', () => {
     expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
   });
 
-  it('clears tool details when an OpenClaw tool stream ends', async () => {
+  it.each(['end', 'result'] as const)('clears tool details when an OpenClaw tool stream emits %s', async (phase) => {
     render(
       <SessionProvider>
         <SessionStatusProbe />
@@ -935,7 +935,7 @@ describe('SessionContext', () => {
           sessionKey: 'agent:reviewer:main',
           stream: 'tool',
           data: {
-            phase: 'end',
+            phase,
             toolCallId: 'tool-1',
           },
         },

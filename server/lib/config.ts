@@ -209,7 +209,7 @@ export function printStartupBanner(version: string): void {
 export async function probeGateway(): Promise<void> {
   try {
     const resp = await fetch(`${config.gatewayUrl}/health`, {
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(config.gatewayHealthTimeoutMs),
     });
     if (resp.ok) {
       console.log('  \x1b[32m✓\x1b[0m Gateway reachable');
