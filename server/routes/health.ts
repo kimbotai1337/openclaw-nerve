@@ -7,12 +7,13 @@ import { Hono } from 'hono';
 import { config } from '../lib/config.js';
 
 const app = new Hono();
+const GATEWAY_HEALTH_TIMEOUT_MS = 10_000;
 
 app.get('/health', async (c) => {
   let gateway: 'ok' | 'unreachable' = 'unreachable';
   try {
     const res = await fetch(`${config.gatewayUrl}/health`, {
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(GATEWAY_HEALTH_TIMEOUT_MS),
     });
     if (res.ok) gateway = 'ok';
   } catch {
