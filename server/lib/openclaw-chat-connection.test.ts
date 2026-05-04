@@ -7,7 +7,7 @@ import {
 
 describe('recordOpenClawGatewayFrame', () => {
   beforeEach(() => {
-    chatLedger.clear();
+    chatLedger.clearForTests();
     clearOpenClawGatewayFrameDedupeForTests();
   });
 

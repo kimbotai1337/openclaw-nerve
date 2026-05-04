@@ -200,17 +200,24 @@ function hasInterveningUserMessage(
   });
 }
 
-function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem): number {
+function equivalentMessageIndexExcept(
+  state: ChatTimelineState,
+  item: ChatTimelineItem,
+  ignoredCandidateIds = new Set<string>(),
+): number {
   const canCollapseAssistantFinal =
     item.kind === 'assistant_message' &&
     item.chatMsg.role === 'assistant' &&
     item.source === 'realtime' &&
     item.status === 'final';
+  const canCollapseHistoryTranscript =
+    item.source === 'history' &&
+    item.status === 'final';
   const canCollapseOptimisticUser =
     item.kind === 'user_message' &&
     item.chatMsg.role === 'user';
 
-  if (!canCollapseAssistantFinal && !canCollapseOptimisticUser) return -1;
+  if (!canCollapseAssistantFinal && !canCollapseHistoryTranscript && !canCollapseOptimisticUser) return -1;
 
   const text = normalizedAssistantText(item.chatMsg);
   if (!text) return -1;
@@ -218,8 +225,10 @@ function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem
   let bestIndex = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
   state.items.forEach((candidate, index) => {
+    if (ignoredCandidateIds.has(candidate.id)) return;
     if (candidate.kind !== item.kind || candidate.chatMsg.role !== item.chatMsg.role) return;
-    if (canCollapseAssistantFinal && candidate.status !== 'final') return;
+    if ((canCollapseAssistantFinal || canCollapseHistoryTranscript) && candidate.status !== 'final') return;
+    if (canCollapseHistoryTranscript && candidate.source !== 'history') return;
     if (
       canCollapseAssistantFinal &&
       candidate.runId &&
@@ -273,14 +282,18 @@ function hasEquivalentHistoryToolGroup(state: ChatTimelineState, item: ChatTimel
   });
 }
 
-function upsertItem(state: ChatTimelineState, item: ChatTimelineItem): ChatTimelineState {
+function upsertItem(
+  state: ChatTimelineState,
+  item: ChatTimelineItem,
+  options: { ignoredEquivalentIds?: Set<string> } = {},
+): ChatTimelineState {
   const next = cloneState(state);
   let existingIndex = next.items.findIndex((candidate) => candidate.id === item.id);
   if (existingIndex < 0 && hasEquivalentHistoryToolGroup(next, item)) {
     return next;
   }
   if (existingIndex < 0) {
-    existingIndex = equivalentMessageIndex(next, item);
+    existingIndex = equivalentMessageIndexExcept(next, item, options.ignoredEquivalentIds);
   }
 
   if (existingIndex >= 0) {
@@ -336,8 +349,10 @@ function mergeTranscriptItems(
   items: ChatTimelineItem[],
 ): ChatTimelineState {
   let next = state;
+  const mergedBatchIds = new Set<string>();
   for (const item of items) {
-    next = upsertItem(next, item);
+    next = upsertItem(next, item, { ignoredEquivalentIds: mergedBatchIds });
+    mergedBatchIds.add(item.id);
   }
   return next;
 }

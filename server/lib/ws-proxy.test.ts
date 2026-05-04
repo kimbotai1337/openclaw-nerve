@@ -113,7 +113,7 @@ describe('ws-proxy', () => {
     mockedVerifySession.mockReset();
     mockedParseSessionCookie.mockReset();
     mockGw.clearReceived();
-    chatLedger.clear();
+    chatLedger.clearForTests();
 
     // Create a new HTTP server and attach ws-proxy
     proxyServer = createServer();

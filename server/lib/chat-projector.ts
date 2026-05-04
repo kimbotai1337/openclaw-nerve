@@ -20,5 +20,7 @@ export async function buildChatSnapshot(options: ChatSnapshotOptions) {
     history,
     events: replay.events,
     cursor: replay.cursor,
+    fromCursor: replay.fromCursor,
+    hasGap: replay.hasGap,
   };
 }

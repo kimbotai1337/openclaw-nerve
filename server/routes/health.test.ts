@@ -59,11 +59,13 @@ describe('GET /health', () => {
 
   it('should call gateway health endpoint with abort signal', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 
     const app = await importHealthApp();
     await app.request('/health');
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(3_000);
     const callArgs = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(callArgs[0]).toContain('/health');
     expect(callArgs[1]).toHaveProperty('signal');

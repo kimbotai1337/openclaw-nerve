@@ -716,7 +716,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 toolDescription: toolDesc || undefined,
                 since: Date.now(),
               });
-            } else if (ap.data.phase === 'result') {
+            } else if (ap.data.phase === 'result' || ap.data.phase === 'end') {
               setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             }
           } else if (ap.stream === 'assistant') {

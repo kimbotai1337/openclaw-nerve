@@ -42,6 +42,13 @@ function normalizeLanguagePreference(language: string | undefined): string {
   return code;
 }
 
+function positiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export const config = {
   port: Number(process.env.PORT || DEFAULT_PORT),
   sslPort: Number(process.env.SSL_PORT || DEFAULT_SSL_PORT),
@@ -69,6 +76,7 @@ export const config = {
   // Gateway connection
   gatewayUrl: process.env.GATEWAY_URL || DEFAULT_GATEWAY_URL,
   gatewayToken: process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || '',
+  gatewayHealthTimeoutMs: positiveNumberEnv('NERVE_GATEWAY_HEALTH_TIMEOUT_MS', 3_000),
   publicOrigin: process.env.NERVE_PUBLIC_ORIGIN || '',
 
   // Agent identity (used in UI)

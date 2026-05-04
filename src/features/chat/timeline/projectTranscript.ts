@@ -31,7 +31,7 @@ export function transcriptItemId(params: {
   msg: ChatMsg;
   index?: number;
 }): string {
-  const { sessionKey, msg } = params;
+  const { sessionKey, msg, index } = params;
   const timestamp = timestampMs(msg);
   const thinking = msg.isThinking ? 'thinking' : 'message';
   const text = normalizeForId(msg.rawText || msg.html || '');
@@ -43,6 +43,7 @@ export function transcriptItemId(params: {
     thinking,
     grouped,
     timestamp,
+    index ?? 0,
     encodeURIComponent(text),
   ].join(':');
 }

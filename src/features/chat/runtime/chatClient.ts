@@ -15,6 +15,8 @@ export interface ChatSnapshot {
   };
   events: ChatLedgerRecord[];
   cursor: number;
+  fromCursor?: number;
+  hasGap?: boolean;
 }
 
 export interface FetchChatSnapshotOptions {

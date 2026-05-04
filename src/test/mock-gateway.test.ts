@@ -196,4 +196,30 @@ describe('MockGateway modern OpenClaw protocol support', () => {
       },
     });
   });
+
+  it('emits grouped final messages in the live chat event', async () => {
+    const gateway = await createGateway();
+    const ws = await connectClient(gateway);
+    const messages = [
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'First' }], timestamp: 10 },
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Second' }], timestamp: 11 },
+    ];
+
+    const finalEvent = nextJson(ws);
+    gateway.sendChatFinal({
+      sessionKey: 'agent:test:main',
+      runId: 'run-1',
+      seq: 4,
+      messages,
+    });
+
+    await expect(finalEvent).resolves.toMatchObject({
+      type: 'event',
+      event: 'chat',
+      payload: {
+        state: 'final',
+        messages,
+      },
+    });
+  });
 });

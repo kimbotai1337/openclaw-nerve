@@ -19,6 +19,8 @@ describe('chatClient', () => {
       history: { messages: [{ role: 'assistant', content: 'hello' }] },
       events: [],
       cursor: 3,
+      fromCursor: 2,
+      hasGap: true,
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -26,6 +28,8 @@ describe('chatClient', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/chat/sessions/agent%3Atest%3Amain/snapshot?cursor=1&limit=50');
     expect(snapshot.cursor).toBe(3);
+    expect(snapshot.fromCursor).toBe(2);
+    expect(snapshot.hasGap).toBe(true);
     expect(snapshot.history.messages[0]).toMatchObject({ content: 'hello' });
   });
 

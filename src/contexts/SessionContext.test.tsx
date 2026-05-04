@@ -83,7 +83,13 @@ function SessionUnreadProbe() {
 
 function SessionStatusProbe() {
   const { agentStatus } = useSessionContext();
-  return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
+  const status = agentStatus['agent:reviewer:main'];
+  return (
+    <div>
+      <div data-testid="reviewer-status">{status?.status ?? 'NONE'}</div>
+      <div data-testid="reviewer-tool">{status?.toolName ?? ''}</div>
+    </div>
+  );
 }
 
 describe('SessionContext', () => {
@@ -887,6 +893,58 @@ describe('SessionContext', () => {
     });
 
     expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+  });
+
+  it('clears tool details when an OpenClaw tool stream ends', async () => {
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(subscribedHandler).not.toBeNull();
+    });
+
+    await act(async () => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            toolCallId: 'tool-1',
+            name: 'exec',
+            args: { cmd: 'pwd' },
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    expect(screen.getByTestId('reviewer-tool').textContent).toBe('exec');
+
+    await act(async () => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          stream: 'tool',
+          data: {
+            phase: 'end',
+            toolCallId: 'tool-1',
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    expect(screen.getByTestId('reviewer-tool').textContent).toBe('');
   });
 
   it('uses the latest refresh callback for delayed refreshes after gateway changes', async () => {

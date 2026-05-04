@@ -18,7 +18,7 @@ function buildApp() {
 describe('chat routes', () => {
   afterEach(() => {
     gatewayRpcCall.mockReset();
-    chatLedger.clear();
+    chatLedger.clearForTests();
   });
 
   it('returns a history snapshot plus replayed ledger events', async () => {

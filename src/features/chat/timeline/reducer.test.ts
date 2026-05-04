@@ -184,6 +184,62 @@ describe('chat timeline reducer', () => {
     ]);
   });
 
+  it('keeps repeated transcript messages with the same text and timestamp distinct', () => {
+    const messages = [
+      { role: 'assistant' as const, content: 'same answer', timestamp: 1_000 },
+      { role: 'assistant' as const, content: 'same answer', timestamp: 1_000 },
+    ];
+    const projected = projectTranscriptMessages({
+      sessionKey,
+      source: 'history',
+      messages,
+    });
+
+    expect(new Set(projected.map((item) => item.id)).size).toBe(2);
+
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages,
+    });
+
+    expect(selectTimelineMessages(state).map((m) => m.rawText)).toEqual([
+      'same answer',
+      'same answer',
+    ]);
+  });
+
+  it('deduplicates recovered history tool bubbles when a shorter tail shifts transcript indexes', () => {
+    const toolMessage = {
+      role: 'assistant' as const,
+      timestamp: 2_000,
+      content: [
+        { type: 'toolCall' as const, name: 'exec', arguments: { command: 'pwd' } },
+      ],
+    };
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'prompt', timestamp: 1_000 },
+        toolMessage,
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [toolMessage],
+    });
+
+    expect(selectTimelineMessages(state).map((m) => m.role)).toEqual(['user', 'tool']);
+  });
+
   it('orders replayed assistant finals between their surrounding history messages', () => {
     let state = createChatTimelineState(sessionKey);
     state = reduceTimelineEvent(state, {

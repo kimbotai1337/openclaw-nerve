@@ -343,6 +343,7 @@ export class MockGateway {
       seq: params.seq,
       state: 'final',
       ...(message ? { message } : {}),
+      ...(params.messages ? { messages: params.messages } : {}),
       ...(params.stopReason ? { stopReason: params.stopReason } : {}),
     });
   }
