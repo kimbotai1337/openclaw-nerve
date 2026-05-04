@@ -25,9 +25,16 @@ const { createDeviceBlockMock } = vi.hoisted(() => ({
     _debug: { clientId, clientMode, role, scopes, token },
   })),
 }));
+const { recordOpenClawGatewayFrameMock } = vi.hoisted(() => ({
+  recordOpenClawGatewayFrameMock: vi.fn(),
+}));
 
 vi.mock('./device-identity.js', () => ({
   createDeviceBlock: createDeviceBlockMock,
+}));
+
+vi.mock('./openclaw-chat-connection.js', () => ({
+  recordOpenClawGatewayFrame: recordOpenClawGatewayFrameMock,
 }));
 
 import {
@@ -49,6 +56,7 @@ async function importFreshGatewayRpc() {
 describe('gateway-rpc (persistent WebSocket)', () => {
   /** Handler for incoming RPC method calls (after connect handshake) */
   let rpcHandler: (method: string, params: unknown) => unknown;
+  let afterRpcResponse: ((ws: { send: (data: string) => void }, msg: { method?: string }) => void) | null;
   let lastConnectParams: unknown = null;
   let lastRequestOrigin: string | undefined;
   let connectMode: 'accept' | 'reject' | 'close' = 'accept';
@@ -90,6 +98,7 @@ describe('gateway-rpc (persistent WebSocket)', () => {
         try {
           const result = rpcHandler(msg.method, msg.params);
           ws.send(JSON.stringify({ type: 'res', id: msg.id, ok: true, payload: result }));
+          afterRpcResponse?.(ws, msg);
         } catch (err) {
           ws.send(JSON.stringify({
             type: 'res', id: msg.id, ok: false,
@@ -106,11 +115,13 @@ describe('gateway-rpc (persistent WebSocket)', () => {
 
   beforeEach(() => {
     rpcHandler = () => ({});
+    afterRpcResponse = null;
     lastConnectParams = null;
     lastRequestOrigin = undefined;
     connectMode = 'accept';
     delete process.env.NERVE_PUBLIC_ORIGIN;
     delete process.env.ALLOWED_ORIGINS;
+    recordOpenClawGatewayFrameMock.mockClear();
   });
 
   afterEach(() => {
@@ -217,6 +228,28 @@ describe('gateway-rpc (persistent WebSocket)', () => {
       expect(r1).toEqual({ echo: 'a' });
       expect(r2).toEqual({ echo: 'b' });
       expect(r3).toEqual({ echo: 'c' });
+    });
+
+    it('records unsolicited chat events received on the persistent RPC connection', async () => {
+      afterRpcResponse = (ws, msg) => {
+        if (msg.method !== 'chat.send') return;
+        ws.send(JSON.stringify({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            sessionKey: 'agent:test:main',
+            runId: 'run-1',
+            seq: 1,
+            state: 'delta',
+            message: { role: 'assistant', content: 'streaming' },
+          },
+        }));
+      };
+
+      await gatewayRpcCall('chat.send', { sessionKey: 'agent:test:main', message: 'hello' });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(recordOpenClawGatewayFrameMock).toHaveBeenCalledWith(expect.stringContaining('"event":"chat"'));
     });
 
     it('rejects when the gateway rejects the initial connect handshake', async () => {

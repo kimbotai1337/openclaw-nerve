@@ -5,6 +5,7 @@ import {
   ledgerRecordToGatewayEvent,
   refreshChatSnapshot,
   sendChat,
+  subscribeChatEvents,
 } from './chatClient';
 
 describe('chatClient', () => {
@@ -38,9 +39,64 @@ describe('chatClient', () => {
     })).toEqual({
       type: 'event',
       event: 'agent',
-      seq: 7,
       payload: { sessionKey: 'agent:test:main', runId: 'run-1' },
     });
+  });
+
+  it('subscribes to chat timeline server-sent events with the latest cursor', () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = [];
+      listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
+      closed = false;
+
+      constructor(public url: string) {
+        MockEventSource.instances.push(this);
+      }
+
+      addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+        const listeners = this.listeners.get(type) || new Set();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      emit(type: string, record: unknown) {
+        for (const listener of this.listeners.get(type) || []) {
+          listener({ data: JSON.stringify(record) } as MessageEvent<string>);
+        }
+      }
+
+      close() {
+        this.closed = true;
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource);
+    const received: unknown[] = [];
+
+    const unsubscribe = subscribeChatEvents('agent:test:main', 7, (record) => {
+      received.push(record);
+    });
+
+    expect(MockEventSource.instances[0].url).toBe('/api/chat/events?sessionKey=agent%3Atest%3Amain&cursor=7');
+
+    MockEventSource.instances[0].emit('chat.timeline', {
+      cursor: 8,
+      sessionKey: 'agent:test:main',
+      type: 'chat',
+      payload: { sessionKey: 'agent:test:main' },
+      ts: 10,
+    });
+
+    expect(received).toEqual([
+      expect.objectContaining({ cursor: 8, type: 'chat' }),
+    ]);
+
+    unsubscribe();
+    expect(MockEventSource.instances[0].closed).toBe(true);
   });
 
   it('posts chat sends through the server adapter', async () => {

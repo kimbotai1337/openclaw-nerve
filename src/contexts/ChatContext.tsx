@@ -53,7 +53,14 @@ import { useChatStreaming } from '@/hooks/useChatStreaming';
 import { useChatRecovery } from '@/hooks/useChatRecovery';
 import { useChatTTS } from '@/hooks/useChatTTS';
 import { ChatTimelineStore } from '@/features/chat/runtime/chatTimelineStore';
-import { fetchChatSnapshot, ledgerRecordToGatewayEvent } from '@/features/chat/runtime/chatClient';
+import {
+  abortChat as abortChatViaServer,
+  fetchChatSnapshot,
+  ledgerRecordToGatewayEvent,
+  sendChat as sendChatViaServer,
+  subscribeChatEvents,
+  type ChatLedgerRecord,
+} from '@/features/chat/runtime/chatClient';
 
 // ─── Exported types (consumed by features/chat components) ──────────────────────
 
@@ -130,6 +137,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const lastChatSeqRef = useRef<number | null>(null);
   const toolResultRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timelineStoreRef = useRef(new ChatTimelineStore());
+  const timelineCursorRef = useRef(new Map<string, number>());
+  const [timelineSubscription, setTimelineSubscription] = useState<{ sessionKey: string; cursor: number } | null>(null);
 
   // ─── Compose hooks ────────────────────────────────────────────────────────
   const msgHook = useChatMessages({ rpc, currentSessionRef });
@@ -163,7 +172,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const event = ledgerRecordToGatewayEvent(record);
         if (event) timelineStoreRef.current.ingestGatewayEvent(event);
       }
+      timelineCursorRef.current.set(sk, snapshot.cursor);
       if (sk !== currentSessionRef.current) return;
+      setTimelineSubscription({ sessionKey: sk, cursor: snapshot.cursor });
       applyMessageWindow(timelineStoreRef.current.messages(sk), true);
     } catch (snapshotError) {
       try {
@@ -226,6 +237,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeRunIdRef.current = null;
     lastGatewaySeqRef.current = null;
     lastChatSeqRef.current = null;
+    setTimelineSubscription(null);
     if (toolResultRefreshRef.current) {
       clearTimeout(toolResultRefreshRef.current);
       toolResultRefreshRef.current = null;
@@ -324,6 +336,82 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     isRecoveryPending,
     triggerRecovery,
   ]);
+
+  const applyTimelineLedgerRecord = useCallback((record: ChatLedgerRecord) => {
+    const previousCursor = timelineCursorRef.current.get(record.sessionKey) ?? 0;
+    timelineCursorRef.current.set(record.sessionKey, Math.max(previousCursor, record.cursor));
+
+    const msg = ledgerRecordToGatewayEvent(record);
+    if (!msg) return;
+
+    const classified = classifyStreamEvent(msg);
+    if (!classified?.sessionKey) return;
+
+    timelineStoreRef.current.ingestGatewayEvent(msg);
+
+    const currentSk = currentSessionRef.current;
+    if (classified.sessionKey !== currentSk) return;
+
+    const timelineMessages = timelineStoreRef.current.messages(currentSk);
+    if (timelineMessages.length > 0) applyMessageWindow(timelineMessages, false);
+
+    const { type } = classified;
+    const now = Date.now();
+
+    if (type === 'chat_started' || type === 'lifecycle_start') {
+      setIsGenerating(true);
+      setProcessingStage('thinking');
+      setLastEventTimestamp(now);
+      return;
+    }
+
+    if (type === 'chat_delta' || type === 'assistant_stream') {
+      setIsGenerating(true);
+      setProcessingStage('streaming');
+      setLastEventTimestamp(now);
+      return;
+    }
+
+    if (type === 'agent_tool_start') {
+      setIsGenerating(true);
+      setProcessingStage('tool_use');
+      if (classified.agentPayload) addActivityEntry(classified.agentPayload);
+      setLastEventTimestamp(now);
+      return;
+    }
+
+    if (type === 'agent_tool_result') {
+      const completedId = classified.agentPayload?.data?.toolCallId;
+      if (completedId) completeActivityEntry(completedId);
+      setLastEventTimestamp(now);
+      return;
+    }
+
+    if (type === 'chat_final' || type === 'chat_aborted' || type === 'chat_error' || type === 'lifecycle_end') {
+      setIsGenerating(false);
+      setProcessingStage(null);
+      setActivityLog([]);
+      setLastEventTimestamp(0);
+      clearStreamBuffer();
+    }
+  }, [
+    applyMessageWindow,
+    addActivityEntry,
+    completeActivityEntry,
+    setProcessingStage,
+    setLastEventTimestamp,
+    setActivityLog,
+    clearStreamBuffer,
+  ]);
+
+  useEffect(() => {
+    if (!timelineSubscription || timelineSubscription.sessionKey !== currentSession) return;
+    return subscribeChatEvents(
+      timelineSubscription.sessionKey,
+      timelineSubscription.cursor,
+      applyTimelineLedgerRecord,
+    );
+  }, [currentSession, timelineSubscription, applyTimelineLedgerRecord]);
 
   // ─── Subscribe to streaming events ────────────────────────────────────────
   useEffect(() => {
@@ -640,6 +728,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     rpc,
   ]);
 
+  const serverChatRpc = useCallback((method: string, params: Record<string, unknown>) => {
+    if (method !== 'chat.send') return rpc(method, params);
+
+    return sendChatViaServer({
+      sessionKey: typeof params.sessionKey === 'string' ? params.sessionKey : '',
+      message: typeof params.message === 'string' ? params.message : '',
+      idempotencyKey: typeof params.idempotencyKey === 'string' ? params.idempotencyKey : undefined,
+      attachments: Array.isArray(params.attachments) ? params.attachments : undefined,
+      images: Array.isArray(params.images) ? params.images : undefined,
+    });
+  }, [rpc]);
+
   // ─── Send message ─────────────────────────────────────────────────────────
   const handleSend = useCallback(async (text: string, images?: ImageAttachment[], uploadPayload?: OutgoingUploadPayload) => {
     ttsHook.trackVoiceMessage(text);
@@ -658,7 +758,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : 'ik-' + Date.now();
     try {
       const ack = await sendChatMessage({
-        rpc,
+        rpc: serverChatRpc,
         sessionKey: currentSessionRef.current,
         text,
         images,
@@ -696,14 +796,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       msgHook.setMessages((prev: ChatMsg[]) => [...prev, errMsgBubble]);
       setIsGenerating(false);
     }
-  }, [rpc, msgHook, streamHook, ttsHook, incrementGeneration, setProcessingStage, startThinking]);
+  }, [serverChatRpc, msgHook, streamHook, ttsHook, incrementGeneration, setProcessingStage, startThinking]);
 
   // ─── Abort / Reset ────────────────────────────────────────────────────────
   const handleAbort = useCallback(async () => {
     try {
-      await rpc('chat.abort', { sessionKey: currentSessionRef.current });
+      await abortChatViaServer(currentSessionRef.current);
     } catch (err) {
-      console.debug('[ChatContext] Abort request failed:', err);
+      try {
+        await rpc('chat.abort', { sessionKey: currentSessionRef.current });
+      } catch (fallbackErr) {
+        console.debug('[ChatContext] Abort request failed:', fallbackErr || err);
+      }
     }
   }, [rpc]);
 

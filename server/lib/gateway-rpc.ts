@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { config } from './config.js';
 import { createDeviceBlock } from './device-identity.js';
+import { recordOpenClawGatewayFrame } from './openclaw-chat-connection.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -181,6 +182,8 @@ function ensureConnection(): void {
   });
 
   socket.on('message', (data: Buffer | string) => {
+    recordOpenClawGatewayFrame(data.toString());
+
     try {
       const msg = JSON.parse(data.toString());
 

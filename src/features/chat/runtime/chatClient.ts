@@ -86,6 +86,33 @@ export async function refreshChatSnapshot(
   });
 }
 
+export function subscribeChatEvents(
+  sessionKey: string,
+  cursor: number,
+  onRecord: (record: ChatLedgerRecord) => void,
+): () => void {
+  if (typeof EventSource === 'undefined') return () => {};
+
+  const params = new URLSearchParams({ sessionKey });
+  if (cursor > 0) params.set('cursor', String(cursor));
+
+  const source = new EventSource(`/api/chat/events?${params.toString()}`);
+  const handleTimelineEvent = (event: MessageEvent<string>) => {
+    try {
+      onRecord(JSON.parse(event.data) as ChatLedgerRecord);
+    } catch {
+      // Ignore malformed server-sent events; the connection will keep streaming.
+    }
+  };
+
+  source.addEventListener('chat.timeline', handleTimelineEvent);
+
+  return () => {
+    source.removeEventListener('chat.timeline', handleTimelineEvent);
+    source.close();
+  };
+}
+
 export function ledgerRecordToGatewayEvent(record: ChatLedgerRecord): GatewayEvent | null {
   if (record.type !== 'chat' && record.type !== 'agent' && record.type !== 'session.tool') {
     return null;
@@ -93,7 +120,6 @@ export function ledgerRecordToGatewayEvent(record: ChatLedgerRecord): GatewayEve
   return {
     type: 'event',
     event: record.type,
-    seq: record.cursor,
     payload: record.payload,
   };
 }
