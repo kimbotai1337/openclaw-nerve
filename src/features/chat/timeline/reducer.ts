@@ -217,6 +217,10 @@ function equivalentMessageIndexExcept(
     canCollapseHistoryTranscript &&
     item.kind === 'user_message' &&
     item.chatMsg.role === 'user';
+  const canCollapseHistoryAssistantWithRealtime =
+    canCollapseHistoryTranscript &&
+    item.kind === 'assistant_message' &&
+    item.chatMsg.role === 'assistant';
 
   if (!canCollapseAssistantFinal && !canCollapseHistoryTranscript) return -1;
 
@@ -234,6 +238,9 @@ function equivalentMessageIndexExcept(
         if (candidate.status !== 'final') return;
       } else if (canCollapseHistoryUserWithOptimistic && candidate.source === 'optimistic') {
         if (candidate.status !== 'pending' && candidate.status !== 'final') return;
+        if (hasInterveningUserMessage(state, candidate, item)) return;
+      } else if (canCollapseHistoryAssistantWithRealtime && candidate.source === 'realtime') {
+        if (candidate.status !== 'final') return;
         if (hasInterveningUserMessage(state, candidate, item)) return;
       } else {
         return;
