@@ -240,6 +240,74 @@ describe('chat timeline reducer', () => {
     expect(selectTimelineMessages(state).map((m) => m.role)).toEqual(['user', 'tool']);
   });
 
+  it.each([
+    ['pending', true],
+    ['confirmed', false],
+  ])('reconciles a history prompt with an existing %s optimistic prompt after session reload', (_label, pending) => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'optimistic_message',
+      sessionKey,
+      source: 'optimistic',
+      timestamp: 1_000,
+      chatMsg: {
+        msgId: 'local-prompt',
+        tempId: 'temp-prompt',
+        role: 'user',
+        html: 'reload prompt',
+        rawText: 'reload prompt',
+        timestamp: new Date(1_000),
+        pending,
+      },
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'reload prompt', timestamp: 1_002 },
+      ],
+    });
+
+    const messages = selectTimelineMessages(state);
+    expect(messages.map((m) => m.rawText)).toEqual(['reload prompt']);
+    expect(messages[0].pending).toBeUndefined();
+  });
+
+  it('keeps a new optimistic prompt distinct from a similar older history prompt', () => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'repeat prompt', timestamp: 1_000 },
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'optimistic_message',
+      sessionKey,
+      source: 'optimistic',
+      timestamp: 1_005,
+      chatMsg: {
+        msgId: 'local-repeat',
+        tempId: 'temp-repeat',
+        role: 'user',
+        html: 'repeat prompt',
+        rawText: 'repeat prompt',
+        timestamp: new Date(1_005),
+        pending: true,
+      },
+    });
+
+    expect(selectTimelineMessages(state).map((m) => m.rawText)).toEqual([
+      'repeat prompt',
+      'repeat prompt',
+    ]);
+  });
+
   it('orders replayed assistant finals between their surrounding history messages', () => {
     let state = createChatTimelineState(sessionKey);
     state = reduceTimelineEvent(state, {

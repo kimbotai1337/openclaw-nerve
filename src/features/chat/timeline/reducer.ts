@@ -213,11 +213,12 @@ function equivalentMessageIndexExcept(
   const canCollapseHistoryTranscript =
     item.source === 'history' &&
     item.status === 'final';
-  const canCollapseOptimisticUser =
+  const canCollapseHistoryUserWithOptimistic =
+    canCollapseHistoryTranscript &&
     item.kind === 'user_message' &&
     item.chatMsg.role === 'user';
 
-  if (!canCollapseAssistantFinal && !canCollapseHistoryTranscript && !canCollapseOptimisticUser) return -1;
+  if (!canCollapseAssistantFinal && !canCollapseHistoryTranscript) return -1;
 
   const text = normalizedAssistantText(item.chatMsg);
   if (!text) return -1;
@@ -227,24 +228,22 @@ function equivalentMessageIndexExcept(
   state.items.forEach((candidate, index) => {
     if (ignoredCandidateIds.has(candidate.id)) return;
     if (candidate.kind !== item.kind || candidate.chatMsg.role !== item.chatMsg.role) return;
-    if ((canCollapseAssistantFinal || canCollapseHistoryTranscript) && candidate.status !== 'final') return;
-    if (canCollapseHistoryTranscript && candidate.source !== 'history') return;
+    if (canCollapseAssistantFinal && candidate.status !== 'final') return;
+    if (canCollapseHistoryTranscript) {
+      if (candidate.source === 'history') {
+        if (candidate.status !== 'final') return;
+      } else if (canCollapseHistoryUserWithOptimistic && candidate.source === 'optimistic') {
+        if (candidate.status !== 'pending' && candidate.status !== 'final') return;
+        if (hasInterveningUserMessage(state, candidate, item)) return;
+      } else {
+        return;
+      }
+    }
     if (
       canCollapseAssistantFinal &&
       candidate.runId &&
       item.runId &&
       candidate.runId !== item.runId
-    ) return;
-    if (
-      canCollapseOptimisticUser &&
-      candidate.source !== 'optimistic' &&
-      item.source !== 'optimistic'
-    ) return;
-    if (
-      canCollapseOptimisticUser &&
-      candidate.source === 'optimistic' &&
-      item.source === 'optimistic' &&
-      candidate.id !== item.id
     ) return;
     if (normalizedAssistantText(candidate.chatMsg) !== text) return;
     if (canCollapseAssistantFinal && hasInterveningUserMessage(state, candidate, item)) return;
