@@ -88,6 +88,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   const prevMessageCount = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const isLoadingMore = useRef(false);
+  const hasStreamingTimelineMessage = messages.some((message) => message.streaming);
   const loadMoreRef = useRef(loadMore);
   const hasMoreRef = useRef(hasMore);
 
@@ -375,7 +376,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         )}
 
         {/* Streaming message with condensed activity log */}
-        {isGenerating && stream.html && (
+        {isGenerating && stream.html && !hasStreamingTimelineMessage && (
           <>
             <StreamingMessage html={stream.html} elapsedMs={processingTime} agentName={agentName} />
             {activityLog.length > 0 && (

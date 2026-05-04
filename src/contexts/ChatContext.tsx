@@ -497,6 +497,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           run.bufferRaw = delta.text;
           run.bufferText = delta.cleaned;
           scheduleStreamingUpdate(runId, run.bufferText);
+          const timelineMessages = timelineStoreRef.current.messages(currentSessionRef.current);
+          if (timelineMessages.length > 0) applyMessageWindow(timelineMessages, false);
           setProcessingStage('streaming');
         }
         return;
@@ -528,7 +530,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const finalMessages = processChatMessages(extractFinalMessages(cp), { sessionKey: currentSessionRef.current });
 
         if (finalMessages.length > 0) {
-          const merged = mergeFinalMessages(getAllMessages(), finalMessages);
+          const timelineMessages = timelineStoreRef.current.messages(currentSessionRef.current);
+          const merged = timelineMessages.length > 0
+            ? timelineMessages
+            : mergeFinalMessages(getAllMessages(), finalMessages);
           const thinkingDuration = getThinkingDuration(runId);
           const withDuration = thinkingDuration
             ? patchThinkingDuration(merged, thinkingDuration)

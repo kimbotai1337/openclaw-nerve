@@ -155,4 +155,77 @@ describe('ChatContext timeline snapshot hydration', () => {
 
     await waitFor(() => expect(screen.getByText(/exec/)).toHaveTextContent('pwd'));
   });
+
+  it('replaces a streaming timeline assistant item with the final assistant item', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      sessionKey: 'agent:test:main',
+      history: { messages: [] },
+      events: [],
+      cursor: 0,
+    }), { status: 200 })));
+
+    const { ChatProvider, useChat, subscribers } = await setup();
+
+    function Consumer() {
+      const { messages } = useChat();
+      return (
+        <div>
+          {messages.map((message) => (
+            <pre key={message.msgId || message.rawText}>{message.rawText}</pre>
+          ))}
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(subscribers).toHaveLength(1));
+
+    act(() => {
+      subscribers[0]({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:test:main',
+          runId: 'run-stream',
+          seq: 1,
+          state: 'delta',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'partial' }],
+            timestamp: 1,
+          },
+        },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('partial')).toBeInTheDocument());
+
+    act(() => {
+      subscribers[0]({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:test:main',
+          runId: 'run-stream',
+          seq: 2,
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'final answer' }],
+            timestamp: 2,
+          },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('final answer')).toBeInTheDocument();
+      expect(screen.queryByText('partial')).toBeNull();
+    });
+  });
 });
