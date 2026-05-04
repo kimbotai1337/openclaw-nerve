@@ -1,4 +1,4 @@
-import type { ChatMsg } from '@/features/chat/types';
+import type { ChatMsg, ToolGroupEntry } from '@/features/chat/types';
 import { generateMsgId } from '@/features/chat/types';
 import { renderMarkdown, renderToolResults } from '@/utils/helpers';
 import {
@@ -114,6 +114,69 @@ function createToolChatMsg(params: {
     timestamp: new Date(timestamp),
     streaming: false,
   };
+}
+
+function canGroupLiveToolItem(item: ChatTimelineItem): boolean {
+  return (
+    item.kind === 'tool_call' &&
+    item.source === 'realtime' &&
+    item.chatMsg.role === 'tool' &&
+    !item.chatMsg.toolGroup?.length
+  );
+}
+
+function liveToolGroupMessage(items: ChatTimelineItem[]): ChatMsg {
+  const entries: ToolGroupEntry[] = items.map((item) => {
+    const preview = toolPreviewText(item.chatMsg) || item.chatMsg.rawText.slice(0, 80);
+    return {
+      html: item.chatMsg.html,
+      rawText: item.chatMsg.rawText,
+      preview,
+    };
+  });
+  const first = items[0];
+  return {
+    msgId: `live-tool-group:${items.map((item) => item.id).join('|')}`,
+    role: 'tool',
+    html: `Used ${entries.length} tools`,
+    rawText: entries.map((entry) => entry.preview).join('\n'),
+    timestamp: first.chatMsg.timestamp,
+    streaming: false,
+    toolGroup: entries,
+  };
+}
+
+function selectGroupedTimelineMessages(items: ChatTimelineItem[]): ChatMsg[] {
+  const messages: ChatMsg[] = [];
+  let pendingTools: ChatTimelineItem[] = [];
+
+  const flushTools = () => {
+    if (pendingTools.length === 0) return;
+    if (pendingTools.length === 1) {
+      messages.push(pendingTools[0].chatMsg);
+    } else {
+      messages.push(liveToolGroupMessage(pendingTools));
+    }
+    pendingTools = [];
+  };
+
+  for (const item of items) {
+    if (canGroupLiveToolItem(item)) {
+      if (pendingTools.length === 0 || pendingTools[0].runId === item.runId) {
+        pendingTools.push(item);
+      } else {
+        flushTools();
+        pendingTools.push(item);
+      }
+      continue;
+    }
+
+    flushTools();
+    messages.push(item.chatMsg);
+  }
+
+  flushTools();
+  return messages;
 }
 
 function optimisticItemId(sessionKey: string, msg: ChatMsg): string {
@@ -378,7 +441,7 @@ export function reduceTimelineEvent(
 }
 
 export function selectTimelineMessages(state: ChatTimelineState): ChatMsg[] {
-  return [...state.items]
-    .sort((a, b) => (a.timestamp - b.timestamp) || (a.order - b.order))
-    .map((item) => item.chatMsg);
+  const sortedItems = [...state.items]
+    .sort((a, b) => (a.timestamp - b.timestamp) || (a.order - b.order));
+  return selectGroupedTimelineMessages(sortedItems);
 }

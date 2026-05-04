@@ -103,6 +103,60 @@ describe('chat timeline reducer', () => {
     expect(state.items[0].status).toBe('completed');
   });
 
+  it('groups consecutive live tool calls from the same run into one bubble', () => {
+    let state = createChatTimelineState(sessionKey);
+
+    const firstTool: GatewayEvent = {
+      type: 'event',
+      event: 'agent',
+      seq: 1,
+      payload: {
+        sessionKey,
+        runId: 'run-tools',
+        seq: 1,
+        stream: 'item',
+        data: {
+          phase: 'start',
+          kind: 'tool',
+          toolCallId: 'tool-1',
+          name: 'exec',
+          title: 'exec true',
+        },
+      },
+    };
+    const secondTool: GatewayEvent = {
+      type: 'event',
+      event: 'agent',
+      seq: 2,
+      payload: {
+        sessionKey,
+        runId: 'run-tools',
+        seq: 2,
+        stream: 'item',
+        data: {
+          phase: 'start',
+          kind: 'tool',
+          toolCallId: 'tool-2',
+          name: 'cron',
+          title: 'cron status',
+        },
+      },
+    };
+
+    for (const event of [...normalizeGatewayEvent(firstTool), ...normalizeGatewayEvent(secondTool)]) {
+      state = reduceTimelineEvent(state, event);
+    }
+
+    const messages = selectTimelineMessages(state);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].html).toBe('Used 2 tools');
+    expect(messages[0].toolGroup?.map((entry) => entry.preview)).toEqual([
+      'exec true',
+      'cron status',
+    ]);
+  });
+
   it('merges a short recovered history tail without deleting older messages', () => {
     let state = createChatTimelineState(sessionKey);
     state = reduceTimelineEvent(state, {
