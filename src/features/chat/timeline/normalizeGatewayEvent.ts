@@ -89,7 +89,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
     }
 
     if (classified.type === 'lifecycle_end') {
-      const phase = payload.data?.phase;
+      const phase = (payload.data as { phase?: string } | undefined)?.phase;
       if (phase === 'error') {
         return [{
           ...base,
