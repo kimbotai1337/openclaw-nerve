@@ -18,6 +18,10 @@ import {
   pickDefaultSessionKey,
   getRootAgentId,
 } from '@/features/sessions/sessionKeys';
+import {
+  persistSelectedSession,
+  restoreSelectedSession,
+} from '@/features/chat/runtime/selectedSessionStorage';
 
 const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'started']);
 const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed']);
@@ -67,7 +71,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { soundEnabled } = useSettings();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [currentSession, setCurrentSessionRaw] = useState('');
+  const [currentSession, setCurrentSessionRaw] = useState(() => restoreSelectedSession() || '');
   const [agentLogEntries, setAgentLogEntries] = useState<AgentLogEntry[]>([]);
   const [eventEntries, setEventEntries] = useState<EventEntry[]>([]);
   const [agentStatus, setAgentStatus] = useState<Record<string, GranularAgentState>>({});
@@ -119,6 +123,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const setCurrentSession = useCallback((key: string) => {
     currentSessionRef.current = key;
+    persistSelectedSession(key);
     setCurrentSessionRaw(key);
     markSessionRead(key);
   }, [markSessionRead]);

@@ -93,6 +93,7 @@ describe('SessionContext', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     subscribedHandler = null;
     soundEnabledValue = true;
     connectionStateValue = 'connected';
@@ -158,6 +159,16 @@ describe('SessionContext', () => {
     screen.getByTestId('spawn').click();
     await waitFor(() => {
       expect(rpcMock).toHaveBeenCalledWith('agents.create', expect.objectContaining({ name: 'Test' }));
+    });
+  });
+
+  it('restores the selected session after a page refresh', async () => {
+    window.localStorage.setItem('nerve:chat:selected-session', 'agent:designer:main');
+
+    render(<SessionProvider><SessionLabels /></SessionProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session')).toHaveTextContent('agent:designer:main');
     });
   });
 

@@ -7,29 +7,21 @@ import {
 } from '@/features/chat/timeline/reducer';
 import { normalizeGatewayEvent } from '@/features/chat/timeline/normalizeGatewayEvent';
 import type { ChatTimelineEvent, ChatTimelineState } from '@/features/chat/timeline/types';
-
-const SELECTED_SESSION_STORAGE_KEY = 'nerve:chat:selected-session';
-
-export interface SelectedSessionStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): unknown;
-  removeItem(key: string): unknown;
-}
+import {
+  persistSelectedSession as persistSelectedSessionValue,
+  restoreSelectedSession as restoreSelectedSessionValue,
+  type SelectedSessionStorage,
+} from './selectedSessionStorage';
 
 export class ChatTimelineStore {
   private sessions = new Map<string, ChatTimelineState>();
 
-  static persistSelectedSession(sessionKey: string, storage: SelectedSessionStorage = window.localStorage): void {
-    if (sessionKey.trim()) {
-      storage.setItem(SELECTED_SESSION_STORAGE_KEY, sessionKey);
-    } else {
-      storage.removeItem(SELECTED_SESSION_STORAGE_KEY);
-    }
+  static persistSelectedSession(sessionKey: string, storage?: SelectedSessionStorage): void {
+    persistSelectedSessionValue(sessionKey, storage);
   }
 
-  static restoreSelectedSession(storage: SelectedSessionStorage = window.localStorage): string | null {
-    const value = storage.getItem(SELECTED_SESSION_STORAGE_KEY);
-    return value?.trim() || null;
+  static restoreSelectedSession(storage?: SelectedSessionStorage): string | null {
+    return restoreSelectedSessionValue(storage);
   }
 
   getState(sessionKey: string): ChatTimelineState {
