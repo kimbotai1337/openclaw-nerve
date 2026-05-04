@@ -52,6 +52,8 @@ import { useChatMessages, mergeFinalMessages, patchThinkingDuration } from '@/ho
 import { useChatStreaming } from '@/hooks/useChatStreaming';
 import { useChatRecovery } from '@/hooks/useChatRecovery';
 import { useChatTTS } from '@/hooks/useChatTTS';
+import { ChatTimelineStore } from '@/features/chat/runtime/chatTimelineStore';
+import { fetchChatSnapshot, ledgerRecordToGatewayEvent } from '@/features/chat/runtime/chatClient';
 
 // ─── Exported types (consumed by features/chat components) ──────────────────────
 
@@ -127,6 +129,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const lastGatewaySeqRef = useRef<number | null>(null);
   const lastChatSeqRef = useRef<number | null>(null);
   const toolResultRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timelineStoreRef = useRef(new ChatTimelineStore());
 
   // ─── Compose hooks ────────────────────────────────────────────────────────
   const msgHook = useChatMessages({ rpc, currentSessionRef });
@@ -145,10 +148,43 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   });
 
   const {
-    loadHistory,
     getAllMessages,
     applyMessageWindow,
   } = msgHook;
+
+  const loadHistoryWithTimeline = useCallback(async (session?: string) => {
+    const sk = session || currentSessionRef.current;
+    if (!sk) return;
+
+    try {
+      const snapshot = await fetchChatSnapshot(sk, { cursor: 0, limit: 500 });
+      timelineStoreRef.current.hydrateHistory(sk, snapshot.history?.messages || []);
+      for (const record of snapshot.events || []) {
+        const event = ledgerRecordToGatewayEvent(record);
+        if (event) timelineStoreRef.current.ingestGatewayEvent(event);
+      }
+      if (sk !== currentSessionRef.current) return;
+      applyMessageWindow(timelineStoreRef.current.messages(sk), true);
+    } catch (snapshotError) {
+      try {
+        const result = await loadChatHistory({ rpc, sessionKey: sk, limit: 500 });
+        if (sk !== currentSessionRef.current) return;
+        applyMessageWindow(result, true);
+      } catch (historyError) {
+        const errMsg = historyError instanceof Error
+          ? historyError.message
+          : (snapshotError instanceof Error ? snapshotError.message : String(historyError));
+        if (sk !== currentSessionRef.current) return;
+        applyMessageWindow([{
+          msgId: generateMsgId(),
+          role: 'system' as const,
+          html: 'Failed to load history: ' + errMsg,
+          rawText: '',
+          timestamp: new Date(),
+        }], true);
+      }
+    }
+  }, [applyMessageWindow, rpc]);
   const {
     triggerRecovery,
     clearDisconnectState,
@@ -181,6 +217,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ─── Reset transient state on session switch ──────────────────────────────
   useEffect(() => {
+    ChatTimelineStore.persistSelectedSession(currentSession);
     setIsGenerating(false);
     msgHook.resetMessageState();
     streamHook.resetStreamState();
@@ -192,6 +229,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (toolResultRefreshRef.current) {
       clearTimeout(toolResultRefreshRef.current);
       toolResultRefreshRef.current = null;
+    }
+    if (currentSession) {
+      const cached = timelineStoreRef.current.messages(currentSession);
+      if (cached.length > 0) applyMessageWindow(cached, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSession]);
@@ -223,8 +264,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (connectionState !== 'connected' || !currentSession) return;
-    loadHistory(currentSession);
-  }, [connectionState, currentSession, loadHistory]);
+    loadHistoryWithTimeline(currentSession);
+  }, [connectionState, currentSession, loadHistoryWithTimeline]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────
   const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;
@@ -296,6 +337,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       const classified = classifyStreamEvent(msg);
       if (!classified) return;
+      timelineStoreRef.current.ingestGatewayEvent(msg);
 
       const currentSk = currentSessionRef.current;
       if (classified.sessionKey !== currentSk) {
@@ -366,12 +408,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (type === 'agent_tool_start') {
           setProcessingStage('tool_use');
           addActivityEntry(ap);
+          const timelineMessages = timelineStoreRef.current.messages(currentSk);
+          if (timelineMessages.length > 0) applyMessageWindow(timelineMessages, false);
           return;
         }
 
         if (type === 'agent_tool_result') {
           const completedId = ap.data?.toolCallId;
           if (completedId) completeActivityEntry(completedId);
+          const timelineMessages = timelineStoreRef.current.messages(currentSk);
+          if (timelineMessages.length > 0) applyMessageWindow(timelineMessages, false);
 
           if (toolResultRefreshRef.current) clearTimeout(toolResultRefreshRef.current);
           const capturedSession = currentSessionRef.current;
@@ -479,7 +525,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
 
         const finalData = extractFinalMessage(cp);
-        const finalMessages = processChatMessages(extractFinalMessages(cp));
+        const finalMessages = processChatMessages(extractFinalMessages(cp), { sessionKey: currentSessionRef.current });
 
         if (finalMessages.length > 0) {
           const merged = mergeFinalMessages(getAllMessages(), finalMessages);
@@ -703,7 +749,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleSend,
     handleAbort,
     handleReset,
-    loadHistory: loadHistory,
+    loadHistory: loadHistoryWithTimeline,
     loadMore: msgHook.loadMore,
     hasMore: msgHook.hasMore,
     showResetConfirm,
@@ -720,7 +766,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleSend,
     handleAbort,
     handleReset,
-    loadHistory,
+    loadHistoryWithTimeline,
     msgHook.loadMore,
     msgHook.hasMore,
     showResetConfirm,
