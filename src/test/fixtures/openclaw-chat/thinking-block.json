@@ -1,0 +1,22 @@
+{
+  "sessionKey": "agent:test:main",
+  "runId": "run-thinking-1",
+  "history": {
+    "messages": [
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "I need to inspect the current session state."
+          },
+          {
+            "type": "text",
+            "text": "I checked the session state."
+          }
+        ],
+        "timestamp": 1777914200000
+      }
+    ]
+  }
+}

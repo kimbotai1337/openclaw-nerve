@@ -1,0 +1,60 @@
+{
+  "sessionKey": "agent:test:main",
+  "runId": "run-tool-1",
+  "events": [
+    {
+      "type": "event",
+      "event": "agent",
+      "seq": 10,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-tool-1",
+        "seq": 1,
+        "stream": "tool",
+        "ts": 1777914100000,
+        "data": {
+          "phase": "start",
+          "toolCallId": "tool-1",
+          "name": "exec",
+          "args": { "cmd": "pwd" }
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": "agent",
+      "seq": 11,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-tool-1",
+        "seq": 2,
+        "stream": "tool",
+        "ts": 1777914100500,
+        "data": {
+          "phase": "result",
+          "toolCallId": "tool-1"
+        }
+      }
+    }
+  ],
+  "history": {
+    "messages": [
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tool-1",
+            "name": "exec",
+            "input": { "cmd": "pwd" }
+          },
+          {
+            "type": "text",
+            "text": "The working directory is `/tmp/project`."
+          }
+        ],
+        "timestamp": 1777914100800
+      }
+    ]
+  }
+}

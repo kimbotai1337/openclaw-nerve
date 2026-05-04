@@ -1,0 +1,68 @@
+{
+  "sessionKey": "agent:test:main",
+  "runId": "run-simple-1",
+  "events": [
+    {
+      "type": "event",
+      "event": "chat",
+      "seq": 1,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-simple-1",
+        "seq": 1,
+        "state": "delta",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "Hel" }],
+          "timestamp": 1777914000000
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": "chat",
+      "seq": 2,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-simple-1",
+        "seq": 2,
+        "state": "delta",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "Hello" }],
+          "timestamp": 1777914000100
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": "chat",
+      "seq": 3,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-simple-1",
+        "seq": 3,
+        "state": "final",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "Hello" }],
+          "timestamp": 1777914000200
+        }
+      }
+    }
+  ],
+  "history": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Say hello",
+        "timestamp": 1777913999000
+      },
+      {
+        "role": "assistant",
+        "content": [{ "type": "text", "text": "Hello" }],
+        "timestamp": 1777914000200
+      }
+    ]
+  }
+}

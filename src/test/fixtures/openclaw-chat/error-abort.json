@@ -1,0 +1,30 @@
+{
+  "sessionKey": "agent:test:main",
+  "runId": "run-error-1",
+  "events": [
+    {
+      "type": "event",
+      "event": "chat",
+      "seq": 20,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-error-1",
+        "seq": 1,
+        "state": "error",
+        "errorMessage": "agent failed"
+      }
+    },
+    {
+      "type": "event",
+      "event": "chat",
+      "seq": 21,
+      "payload": {
+        "sessionKey": "agent:test:main",
+        "runId": "run-abort-1",
+        "seq": 1,
+        "state": "aborted",
+        "stopReason": "user_abort"
+      }
+    }
+  ]
+}

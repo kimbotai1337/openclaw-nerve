@@ -1,0 +1,24 @@
+{
+  "sessionKey": "agent:test:subagent:worker",
+  "parentSessionKey": "agent:test:main",
+  "runId": "run-subagent-1",
+  "events": [
+    {
+      "type": "event",
+      "event": "chat",
+      "seq": 30,
+      "payload": {
+        "sessionKey": "agent:test:subagent:worker",
+        "spawnedBy": "agent:test:main",
+        "runId": "run-subagent-1",
+        "seq": 1,
+        "state": "final",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "Subagent finished." }],
+          "timestamp": 1777914300000
+        }
+      }
+    }
+  ]
+}

@@ -136,6 +136,7 @@ export interface ChatMessage {
 export interface ContentBlock {
   type: ContentBlockType;
   text?: string;
+  thinking?: string;
   name?: string;
   input?: Record<string, unknown>;
   id?: string;
