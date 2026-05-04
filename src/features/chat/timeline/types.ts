@@ -63,6 +63,14 @@ export type ChatTimelineEvent =
       timestamp?: number;
     }
   | {
+      type: 'optimistic_message';
+      sessionKey: string;
+      source: Extract<TimelineSource, 'optimistic'>;
+      chatMsg: ChatMsg;
+      runId?: string;
+      timestamp?: number;
+    }
+  | {
       type: 'run_started';
       sessionKey: string;
       runId: string;

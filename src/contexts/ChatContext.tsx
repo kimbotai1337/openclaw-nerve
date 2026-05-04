@@ -745,8 +745,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     ttsHook.trackVoiceMessage(text);
 
     const { msg: userMsg, tempId } = buildUserMessage({ text, images, uploadPayload });
+    const sendSessionKey = currentSessionRef.current;
 
     incrementGeneration();
+    timelineStoreRef.current.upsertOptimisticMessage(sendSessionKey, userMsg);
 
     // Optimistic insert (functional updater to avoid read-then-write race)
     msgHook.setAllMessages(prev => [...prev, userMsg]);
@@ -759,7 +761,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const ack = await sendChatMessage({
         rpc: serverChatRpc,
-        sessionKey: currentSessionRef.current,
+        sessionKey: sendSessionKey,
         text,
         images,
         uploadPayload,
@@ -776,12 +778,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       // Confirm the message (functional updater to avoid race after await)
       const confirmMsg = (m: ChatMsg) => m.tempId === tempId ? { ...m, pending: false } : m;
+      timelineStoreRef.current.upsertOptimisticMessage(sendSessionKey, { ...userMsg, pending: false });
       msgHook.setAllMessages(prev => prev.map(confirmMsg));
       msgHook.setMessages((prev: ChatMsg[]) => prev.map(confirmMsg));
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
 
       const failMsg = (m: ChatMsg) => m.tempId === tempId ? { ...m, pending: false, failed: true } : m;
+      timelineStoreRef.current.upsertOptimisticMessage(sendSessionKey, { ...userMsg, pending: false, failed: true });
       msgHook.setAllMessages(prev => prev.map(failMsg));
       msgHook.setMessages((prev: ChatMsg[]) => prev.map(failMsg));
 

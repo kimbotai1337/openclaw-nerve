@@ -310,6 +310,121 @@ describe('ChatContext timeline snapshot hydration', () => {
     expect(rpcMock).not.toHaveBeenCalledWith('chat.send', expect.anything());
   });
 
+  it('keeps live operator, tool, and final assistant bubbles in timeline order before refresh', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/chat/sessions/')) {
+        return new Response(JSON.stringify({
+          sessionKey: 'agent:test:main',
+          history: {
+            messages: [
+              { role: 'assistant', content: 'older answer', timestamp: 1 },
+            ],
+          },
+          events: [],
+          cursor: 0,
+        }), { status: 200 });
+      }
+      if (url === '/api/chat/send') {
+        return new Response(JSON.stringify({ runId: 'run-live', status: 'started' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { ChatProvider, useChat, subscribers } = await setup();
+
+    function Consumer() {
+      const { messages, handleSend } = useChat();
+      return (
+        <div>
+          <button type="button" onClick={() => void handleSend('live prompt')}>send</button>
+          {messages.map((message) => (
+            <pre data-testid="message" data-role={message.role} key={message.msgId || message.rawText}>
+              {message.rawText}
+            </pre>
+          ))}
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('older answer')).toBeInTheDocument());
+    await waitFor(() => expect(subscribers).toHaveLength(1));
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/chat/send', expect.objectContaining({
+      method: 'POST',
+    })));
+
+    const toolTimestamp = Date.now() + 1;
+    act(() => {
+      subscribers[0]({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:test:main',
+          runId: 'run-live',
+          seq: 1,
+          ts: toolTimestamp,
+          stream: 'tool',
+          data: {
+            phase: 'start',
+            toolCallId: 'tool-live',
+            name: 'exec',
+            args: { cmd: 'pwd' },
+          },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      const texts = screen.getAllByTestId('message').map((node) => node.textContent?.trim());
+      expect(texts).toHaveLength(3);
+      expect(texts[0]).toBe('older answer');
+      expect(texts[1]).toBe('live prompt');
+      expect(texts[2]).toContain('exec');
+      expect(texts[2]).toContain('pwd');
+    });
+
+    act(() => {
+      subscribers[0]({
+        type: 'event',
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:test:main',
+          runId: 'run-live',
+          seq: 2,
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'live final' }],
+            timestamp: toolTimestamp + 1,
+          },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      const messages = screen.getAllByTestId('message');
+      const texts = messages.map((node) => node.textContent?.trim());
+      expect(texts).toHaveLength(4);
+      expect(texts[0]).toBe('older answer');
+      expect(texts[1]).toBe('live prompt');
+      expect(texts[2]).toContain('exec');
+      expect(texts[3]).toBe('live final');
+      expect(messages.filter((node) => node.textContent?.includes('live final'))).toHaveLength(1);
+    });
+  });
+
   it('applies server-sent ledger events after snapshot hydration', async () => {
     vi.stubGlobal('EventSource', MockChatEventSource);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({

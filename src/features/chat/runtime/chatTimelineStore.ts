@@ -57,6 +57,16 @@ export class ChatTimelineStore {
     });
   }
 
+  upsertOptimisticMessage(sessionKey: string, chatMsg: ChatMsg): ChatTimelineState {
+    return this.dispatch({
+      type: 'optimistic_message',
+      sessionKey,
+      source: 'optimistic',
+      chatMsg,
+      timestamp: chatMsg.timestamp.getTime(),
+    });
+  }
+
   messages(sessionKey: string): ChatMsg[] {
     return selectTimelineMessages(this.getState(sessionKey));
   }

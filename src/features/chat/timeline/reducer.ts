@@ -5,6 +5,7 @@ import {
   projectTranscriptMessages,
 } from './projectTranscript';
 import type {
+  ChatTimelineItemKind,
   ChatRunTimelineState,
   ChatTimelineEvent,
   ChatTimelineItem,
@@ -43,10 +44,19 @@ function liveToolItemId(sessionKey: string, runId: string, toolCallId: string): 
   return `live:${encodeURIComponent(sessionKey)}:${encodeURIComponent(runId)}:tool:${encodeURIComponent(toolCallId)}`;
 }
 
-const DUPLICATE_ASSISTANT_WINDOW_MS = 15_000;
+const DUPLICATE_MESSAGE_WINDOW_MS = 15_000;
 
 function normalizedAssistantText(msg: ChatMsg): string {
   return msg.rawText.trim().replace(/\s+/g, ' ');
+}
+
+function kindFromChatMsg(msg: ChatMsg): ChatTimelineItemKind {
+  if (msg.isThinking) return 'thinking';
+  if (msg.role === 'assistant') return 'assistant_message';
+  if (msg.role === 'user') return 'user_message';
+  if (msg.role === 'tool') return 'tool_call';
+  if (msg.role === 'toolResult') return 'tool_result';
+  return 'system_event';
 }
 
 function createAssistantChatMsg(text: string, timestamp: number, streaming: boolean): ChatMsg {
@@ -77,9 +87,22 @@ function createToolChatMsg(params: {
   };
 }
 
-function equivalentAssistantIndex(state: ChatTimelineState, item: ChatTimelineItem): number {
-  if (item.kind !== 'assistant_message' || item.chatMsg.role !== 'assistant') return -1;
-  if (item.source !== 'realtime' || item.status !== 'final') return -1;
+function optimisticItemId(sessionKey: string, msg: ChatMsg): string {
+  const localId = msg.tempId || msg.msgId || `${msg.role}:${msg.timestamp.getTime()}:${msg.rawText.slice(0, 80)}`;
+  return `optimistic:${encodeURIComponent(sessionKey)}:${encodeURIComponent(localId)}`;
+}
+
+function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem): number {
+  const canCollapseAssistantFinal =
+    item.kind === 'assistant_message' &&
+    item.chatMsg.role === 'assistant' &&
+    item.source === 'realtime' &&
+    item.status === 'final';
+  const canCollapseOptimisticUser =
+    item.kind === 'user_message' &&
+    item.chatMsg.role === 'user';
+
+  if (!canCollapseAssistantFinal && !canCollapseOptimisticUser) return -1;
 
   const text = normalizedAssistantText(item.chatMsg);
   if (!text) return -1;
@@ -87,12 +110,23 @@ function equivalentAssistantIndex(state: ChatTimelineState, item: ChatTimelineIt
   let bestIndex = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
   state.items.forEach((candidate, index) => {
-    if (candidate.kind !== 'assistant_message' || candidate.chatMsg.role !== 'assistant') return;
-    if (candidate.status !== 'final') return;
+    if (candidate.kind !== item.kind || candidate.chatMsg.role !== item.chatMsg.role) return;
+    if (canCollapseAssistantFinal && candidate.status !== 'final') return;
+    if (
+      canCollapseOptimisticUser &&
+      candidate.source !== 'optimistic' &&
+      item.source !== 'optimistic'
+    ) return;
+    if (
+      canCollapseOptimisticUser &&
+      candidate.source === 'optimistic' &&
+      item.source === 'optimistic' &&
+      candidate.id !== item.id
+    ) return;
     if (normalizedAssistantText(candidate.chatMsg) !== text) return;
 
     const distance = Math.abs(candidate.timestamp - item.timestamp);
-    if (distance <= DUPLICATE_ASSISTANT_WINDOW_MS && distance < bestDistance) {
+    if (distance <= DUPLICATE_MESSAGE_WINDOW_MS && distance < bestDistance) {
       bestIndex = index;
       bestDistance = distance;
     }
@@ -105,7 +139,7 @@ function upsertItem(state: ChatTimelineState, item: ChatTimelineItem): ChatTimel
   const next = cloneState(state);
   let existingIndex = next.items.findIndex((candidate) => candidate.id === item.id);
   if (existingIndex < 0) {
-    existingIndex = equivalentAssistantIndex(next, item);
+    existingIndex = equivalentMessageIndex(next, item);
   }
 
   if (existingIndex >= 0) {
@@ -184,6 +218,24 @@ export function reduceTimelineEvent(
       messages: event.messages,
       runId: event.runId,
     }));
+  }
+
+  if (event.type === 'optimistic_message') {
+    const timestamp = nowOr(event.timestamp ?? event.chatMsg.timestamp.getTime());
+    return upsertItem(state, {
+      id: optimisticItemId(event.sessionKey, event.chatMsg),
+      sessionKey: event.sessionKey,
+      runId: event.runId,
+      kind: kindFromChatMsg(event.chatMsg),
+      source: event.source,
+      status: event.chatMsg.failed ? 'error' : (event.chatMsg.pending ? 'pending' : 'final'),
+      chatMsg: {
+        ...event.chatMsg,
+        timestamp: new Date(timestamp),
+      },
+      order: 0,
+      timestamp,
+    });
   }
 
   if (event.type === 'run_started') {
