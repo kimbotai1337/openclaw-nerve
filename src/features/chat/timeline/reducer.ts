@@ -43,6 +43,12 @@ function liveToolItemId(sessionKey: string, runId: string, toolCallId: string): 
   return `live:${encodeURIComponent(sessionKey)}:${encodeURIComponent(runId)}:tool:${encodeURIComponent(toolCallId)}`;
 }
 
+const DUPLICATE_ASSISTANT_WINDOW_MS = 15_000;
+
+function normalizedAssistantText(msg: ChatMsg): string {
+  return msg.rawText.trim().replace(/\s+/g, ' ');
+}
+
 function createAssistantChatMsg(text: string, timestamp: number, streaming: boolean): ChatMsg {
   return {
     msgId: generateMsgId(),
@@ -71,19 +77,50 @@ function createToolChatMsg(params: {
   };
 }
 
+function equivalentAssistantIndex(state: ChatTimelineState, item: ChatTimelineItem): number {
+  if (item.kind !== 'assistant_message' || item.chatMsg.role !== 'assistant') return -1;
+  if (item.source !== 'realtime' || item.status !== 'final') return -1;
+
+  const text = normalizedAssistantText(item.chatMsg);
+  if (!text) return -1;
+
+  let bestIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  state.items.forEach((candidate, index) => {
+    if (candidate.kind !== 'assistant_message' || candidate.chatMsg.role !== 'assistant') return;
+    if (candidate.status !== 'final') return;
+    if (normalizedAssistantText(candidate.chatMsg) !== text) return;
+
+    const distance = Math.abs(candidate.timestamp - item.timestamp);
+    if (distance <= DUPLICATE_ASSISTANT_WINDOW_MS && distance < bestDistance) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  });
+
+  return bestIndex;
+}
+
 function upsertItem(state: ChatTimelineState, item: ChatTimelineItem): ChatTimelineState {
   const next = cloneState(state);
-  const existingIndex = next.items.findIndex((candidate) => candidate.id === item.id);
+  let existingIndex = next.items.findIndex((candidate) => candidate.id === item.id);
+  if (existingIndex < 0) {
+    existingIndex = equivalentAssistantIndex(next, item);
+  }
 
   if (existingIndex >= 0) {
     const existing = next.items[existingIndex];
+    const timestamp = Math.min(existing.timestamp, item.timestamp);
     next.items[existingIndex] = {
       ...existing,
       ...item,
+      id: existing.id,
       order: existing.order,
+      timestamp,
       chatMsg: {
         ...item.chatMsg,
         msgId: existing.chatMsg.msgId || item.chatMsg.msgId,
+        timestamp: new Date(timestamp),
       },
     };
     return next;
