@@ -1,10 +1,14 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { chatLedger } from './chat-ledger.js';
-import { recordOpenClawGatewayFrame } from './openclaw-chat-connection.js';
+import {
+  clearOpenClawGatewayFrameDedupeForTests,
+  recordOpenClawGatewayFrame,
+} from './openclaw-chat-connection.js';
 
 describe('recordOpenClawGatewayFrame', () => {
   beforeEach(() => {
     chatLedger.clear();
+    clearOpenClawGatewayFrameDedupeForTests();
   });
 
   it('records OpenClaw chat and agent events by session key', () => {
@@ -29,6 +33,25 @@ describe('recordOpenClawGatewayFrame', () => {
       'chat',
       'agent',
     ]);
+  });
+
+  it('records identical gateway broadcasts only once', () => {
+    const frame = JSON.stringify({
+      type: 'event',
+      event: 'chat',
+      payload: {
+        sessionKey: 'agent:test:main',
+        runId: 'run-1',
+        seq: 10,
+        state: 'final',
+        message: { role: 'assistant', content: 'ok' },
+      },
+    });
+
+    recordOpenClawGatewayFrame(frame);
+    recordOpenClawGatewayFrame(frame);
+
+    expect(chatLedger.replay('agent:test:main').events).toHaveLength(1);
   });
 
   it('ignores malformed, unrelated, or sessionless frames', () => {
