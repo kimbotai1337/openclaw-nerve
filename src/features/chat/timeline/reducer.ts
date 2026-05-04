@@ -45,9 +45,38 @@ function liveToolItemId(sessionKey: string, runId: string, toolCallId: string): 
 }
 
 const DUPLICATE_MESSAGE_WINDOW_MS = 15_000;
+const DUPLICATE_TOOL_WINDOW_MS = 60_000;
+
+function normalizeMessageText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
 
 function normalizedAssistantText(msg: ChatMsg): string {
-  return msg.rawText.trim().replace(/\s+/g, ' ');
+  return normalizeMessageText(msg.rawText);
+}
+
+function stripHtml(text: string): string {
+  return text.replace(/<[^>]*>/g, ' ');
+}
+
+function toolPreviewText(msg: ChatMsg): string {
+  const grouped = msg.toolGroup?.map((entry) => entry.preview || entry.rawText).join(' ') || '';
+  const primary = grouped || stripHtml(msg.html) || msg.rawText;
+  return normalizeMessageText(primary);
+}
+
+function toolNames(msg: ChatMsg): Set<string> {
+  const names = new Set<string>();
+  const rawTexts = [
+    msg.rawText,
+    ...(msg.toolGroup?.map((entry) => entry.rawText) || []),
+  ];
+  for (const rawText of rawTexts) {
+    for (const match of rawText.matchAll(/\*\*tool:\*\*\s+`([^`]+)`/g)) {
+      if (match[1]) names.add(match[1]);
+    }
+  }
+  return names;
 }
 
 function kindFromChatMsg(msg: ChatMsg): ChatTimelineItemKind {
@@ -135,9 +164,34 @@ function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem
   return bestIndex;
 }
 
+function hasEquivalentHistoryToolGroup(state: ChatTimelineState, item: ChatTimelineItem): boolean {
+  if (item.kind !== 'tool_call' || item.chatMsg.role !== 'tool' || item.source !== 'realtime') {
+    return false;
+  }
+
+  const preview = toolPreviewText(item.chatMsg);
+  if (!preview) return false;
+
+  return state.items.some((candidate) => {
+    if (candidate.kind !== 'tool_call' || candidate.chatMsg.role !== 'tool') return false;
+    if (candidate.source !== 'history' || !candidate.chatMsg.toolGroup?.length) return false;
+    if (Math.abs(candidate.timestamp - item.timestamp) > DUPLICATE_TOOL_WINDOW_MS) return false;
+
+    const names = toolNames(item.chatMsg);
+    const groupNames = toolNames(candidate.chatMsg);
+    if ([...names].some((name) => groupNames.has(name))) return true;
+
+    const groupPreview = toolPreviewText(candidate.chatMsg);
+    return groupPreview.includes(preview) || preview.includes(groupPreview);
+  });
+}
+
 function upsertItem(state: ChatTimelineState, item: ChatTimelineItem): ChatTimelineState {
   const next = cloneState(state);
   let existingIndex = next.items.findIndex((candidate) => candidate.id === item.id);
+  if (existingIndex < 0 && hasEquivalentHistoryToolGroup(next, item)) {
+    return next;
+  }
   if (existingIndex < 0) {
     existingIndex = equivalentMessageIndex(next, item);
   }

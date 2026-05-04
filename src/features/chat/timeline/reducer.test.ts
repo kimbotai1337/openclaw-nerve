@@ -229,6 +229,42 @@ describe('chat timeline reducer', () => {
     ]);
   });
 
+  it('does not add replayed live tool items when history already has the tool group', () => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        {
+          role: 'assistant',
+          timestamp: 2_000,
+          content: [
+            { type: 'toolCall', name: 'exec', arguments: { command: 'true' } },
+            { type: 'toolCall', name: 'cron', arguments: { action: 'status' } },
+          ],
+        },
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'tool_started',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      toolCallId: 'tool-1',
+      name: 'exec',
+      args: {},
+      description: 'exec true (in ~/.openclaw/workspace)',
+      timestamp: 2_500,
+    });
+
+    const messages = selectTimelineMessages(state);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].toolGroup).toHaveLength(2);
+  });
+
   it('projects thinking blocks from transcript history', () => {
     const items = projectTranscriptMessages({
       sessionKey,
