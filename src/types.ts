@@ -226,10 +226,16 @@ export interface AgentEventPayload {
 
 /** Data within an agent tool-stream event */
 export interface AgentToolStreamData {
-  phase: 'start' | 'result';
+  phase: 'start' | 'result' | 'end';
+  kind?: string;
   toolCallId?: string;
   name?: string;
   args?: Record<string, unknown>;
+  title?: string;
+  meta?: string;
+  status?: string;
+  startedAt?: number;
+  endedAt?: number;
 }
 
 /** Payload for 'cron' events */

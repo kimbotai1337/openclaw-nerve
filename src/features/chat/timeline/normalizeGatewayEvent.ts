@@ -128,13 +128,16 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
     if (classified.type === 'agent_tool_start') {
       const data = payload.data!;
       const args = data.args || {};
+      const description = typeof data.title === 'string' && data.title.trim()
+        ? data.title
+        : (describeToolUse(data.name!, args) || data.name!);
       return [{
         ...base,
         type: 'tool_started',
         toolCallId: data.toolCallId!,
         name: data.name!,
         args,
-        description: describeToolUse(data.name!, args) || data.name!,
+        description,
       }];
     }
 

@@ -79,12 +79,34 @@ describe('classifyStreamEvent', () => {
       expect(classifyStreamEvent(event)?.type).toBe('agent_tool_start');
     });
 
+    it('classifies item-shaped tool start events', () => {
+      const event: GatewayEvent = {
+        type: 'event', event: 'agent',
+        payload: {
+          stream: 'item',
+          data: { phase: 'start', kind: 'tool', name: 'read', toolCallId: 'tc-1' },
+        },
+      };
+      expect(classifyStreamEvent(event)?.type).toBe('agent_tool_start');
+    });
+
     it('classifies tool result events', () => {
       const event: GatewayEvent = {
         type: 'event', event: 'agent',
         payload: {
           stream: 'tool',
           data: { phase: 'result', toolCallId: 'tc-1' },
+        },
+      };
+      expect(classifyStreamEvent(event)?.type).toBe('agent_tool_result');
+    });
+
+    it('classifies item-shaped tool end events as tool results', () => {
+      const event: GatewayEvent = {
+        type: 'event', event: 'agent',
+        payload: {
+          stream: 'item',
+          data: { phase: 'end', kind: 'tool', name: 'read', toolCallId: 'tc-1' },
         },
       };
       expect(classifyStreamEvent(event)?.type).toBe('agent_tool_result');

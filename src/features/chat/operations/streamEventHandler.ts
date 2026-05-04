@@ -98,14 +98,16 @@ export function classifyStreamEvent(event: GatewayEvent): ClassifiedEvent | null
       return { ...base, type: 'assistant_stream' };
     }
 
-    // Real-time tool event streaming
-    if (ap.stream === 'tool') {
+    // Real-time tool event streaming. Older gateway builds emit stream="tool";
+    // current OpenClaw emits stream="item" with data.kind="tool".
+    if (ap.stream === 'tool' || ap.stream === 'item') {
       const data = ap.data;
       if (!data) return { ...base, type: 'ignore' };
+      if (ap.stream === 'item' && data.kind !== 'tool') return { ...base, type: 'ignore' };
       if (data.phase === 'start' && data.name && data.toolCallId) {
         return { ...base, type: 'agent_tool_start' };
       }
-      if (data.phase === 'result' && data.toolCallId) {
+      if ((data.phase === 'result' || data.phase === 'end') && data.toolCallId) {
         return { ...base, type: 'agent_tool_result' };
       }
       return { ...base, type: 'ignore' };
