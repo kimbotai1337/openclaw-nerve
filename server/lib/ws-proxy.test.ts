@@ -51,6 +51,7 @@ import { config } from './config.js';
 import { verifySession, parseSessionCookie } from './session.js';
 import { createDeviceBlock } from './device-identity.js';
 import { createServer as createHttpServer } from 'node:http';
+import { chatLedger } from './chat-ledger.js';
 
 const mockedConfig = config as { auth: boolean; sessionSecret: string };
 const mockedVerifySession = verifySession as ReturnType<typeof vi.fn>;
@@ -112,6 +113,7 @@ describe('ws-proxy', () => {
     mockedVerifySession.mockReset();
     mockedParseSessionCookie.mockReset();
     mockGw.clearReceived();
+    chatLedger.clear();
 
     // Create a new HTTP server and attach ws-proxy
     proxyServer = createServer();
@@ -257,6 +259,37 @@ describe('ws-proxy', () => {
       expect(parsed.type).toBe('event');
       expect(parsed.event).toBe('test');
       expect(parsed.payload.hello).toBe(true);
+
+      ws.close();
+    });
+
+    it('records chat and agent gateway messages in the server chat ledger', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+      await waitForMessage(ws); // consume challenge
+
+      mockGw.broadcast(JSON.stringify({
+        type: 'event',
+        event: 'agent',
+        payload: {
+          sessionKey: 'agent:test:main',
+          runId: 'run-1',
+          stream: 'tool',
+          data: { phase: 'start', toolCallId: 'tool-1', name: 'exec' },
+        },
+      }));
+
+      await waitForMessage(ws);
+      const replay = chatLedger.replay('agent:test:main');
+      expect(replay.events).toHaveLength(1);
+      expect(replay.events[0]).toMatchObject({
+        type: 'agent',
+        payload: {
+          runId: 'run-1',
+          stream: 'tool',
+        },
+      });
 
       ws.close();
     });

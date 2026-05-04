@@ -25,6 +25,7 @@ import { createDeviceBlock, getDeviceIdentity } from './device-identity.js';
 import { gatewayRpcCall } from './gateway-rpc.js';
 import { canInjectGatewayToken } from './trust-utils.js';
 import { isAllowedOrigin } from './origin-utils.js';
+import { chatLedger } from './chat-ledger.js';
 
 /** @internal — exported for test overrides */
 export const _internals = { challengeTimeoutMs: 5_000 };
@@ -40,6 +41,23 @@ const RESTRICTED_METHODS = new Set([
   'sessions.compact',
 ]);
 const CONTROL_UI_CLIENT_ID = 'openclaw-control-ui';
+
+function recordChatLedgerFrame(raw: string): void {
+  try {
+    const msg = JSON.parse(raw) as {
+      type?: string;
+      event?: string;
+      payload?: { sessionKey?: string };
+    };
+    if (msg.type !== 'event') return;
+    if (msg.event !== 'chat' && msg.event !== 'agent' && msg.event !== 'session.tool') return;
+    const sessionKey = msg.payload?.sessionKey;
+    if (!sessionKey) return;
+    chatLedger.append(sessionKey, msg.event, msg.payload);
+  } catch {
+    // Relay correctness must never depend on best-effort timeline recording.
+  }
+}
 
 /**
  * Execute a gateway RPC call, bypassing webchat restrictions.
@@ -306,6 +324,8 @@ function createGatewayRelay(
 
     // Gateway → Client
     gwWs.on('message', (data: Buffer | string, isBinary: boolean) => {
+      if (!isBinary) recordChatLedgerFrame(data.toString());
+
       // Capture challenge nonce before handshake completes
       if (!handshakeComplete && !isBinary) {
         try {
