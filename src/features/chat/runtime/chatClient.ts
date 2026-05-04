@@ -22,6 +22,19 @@ export interface FetchChatSnapshotOptions {
   limit?: number;
 }
 
+async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(payload.error || `${url} failed with HTTP ${res.status}`);
+  }
+  return await res.json() as T;
+}
+
 export async function fetchChatSnapshot(
   sessionKey: string,
   options: FetchChatSnapshotOptions = {},
@@ -38,6 +51,39 @@ export async function fetchChatSnapshot(
     throw new Error(body.error || `Chat snapshot failed with HTTP ${res.status}`);
   }
   return await res.json() as ChatSnapshot;
+}
+
+export interface SendChatParams {
+  sessionKey: string;
+  message: string;
+  idempotencyKey?: string;
+  attachments?: unknown[];
+  images?: unknown[];
+}
+
+export async function sendChat(params: SendChatParams): Promise<unknown> {
+  return postJson('/api/chat/send', {
+    sessionKey: params.sessionKey,
+    message: params.message,
+    ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+    ...(params.attachments ? { attachments: params.attachments } : {}),
+    ...(params.images ? { images: params.images } : {}),
+  });
+}
+
+export async function abortChat(sessionKey: string): Promise<unknown> {
+  return postJson('/api/chat/abort', { sessionKey });
+}
+
+export async function refreshChatSnapshot(
+  sessionKey: string,
+  options: FetchChatSnapshotOptions = {},
+): Promise<ChatSnapshot> {
+  return postJson('/api/chat/refresh', {
+    sessionKey,
+    ...(typeof options.cursor === 'number' ? { cursor: options.cursor } : {}),
+    ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
+  });
 }
 
 export function ledgerRecordToGatewayEvent(record: ChatLedgerRecord): GatewayEvent | null {

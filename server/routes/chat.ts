@@ -20,20 +20,91 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function readJsonObject(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown>> {
+  const body = await c.req.json().catch(() => ({}));
+  return body && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+}
+
+async function buildSnapshot(sessionKey: string, cursor: number, limit: number) {
+  const history = await gatewayRpcCall('chat.history', { sessionKey, limit });
+  const replay = chatLedger.replay(sessionKey, cursor);
+  return {
+    sessionKey,
+    history,
+    events: replay.events,
+    cursor: replay.cursor,
+  };
+}
+
 app.get('/api/chat/sessions/:sessionKey/snapshot', async (c) => {
   const sessionKey = decodeURIComponent(c.req.param('sessionKey'));
   const limit = parsePositiveInt(c.req.query('limit'), 500, 1000);
   const cursor = parseCursor(c.req.query('cursor'));
 
   try {
-    const history = await gatewayRpcCall('chat.history', { sessionKey, limit });
-    const replay = chatLedger.replay(sessionKey, cursor);
-    return c.json({
-      sessionKey,
-      history,
-      events: replay.events,
-      cursor: replay.cursor,
-    });
+    return c.json(await buildSnapshot(sessionKey, cursor, limit));
+  } catch (error) {
+    return c.json({ ok: false, error: errorMessage(error) }, 502);
+  }
+});
+
+app.post('/api/chat/send', async (c) => {
+  const body = await readJsonObject(c);
+  const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey.trim() : '';
+  const message = typeof body.message === 'string' ? body.message : '';
+  if (!sessionKey || !message.trim()) {
+    return c.json({ ok: false, error: 'sessionKey and message are required' }, 400);
+  }
+
+  const params: Record<string, unknown> = {
+    sessionKey,
+    message,
+    deliver: false,
+  };
+  if (typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim()) {
+    params.idempotencyKey = body.idempotencyKey;
+  }
+  if (Array.isArray(body.attachments)) {
+    params.attachments = body.attachments;
+  }
+  if (Array.isArray(body.images)) {
+    params.images = body.images;
+  }
+
+  try {
+    return c.json(await gatewayRpcCall('chat.send', params));
+  } catch (error) {
+    return c.json({ ok: false, error: errorMessage(error) }, 502);
+  }
+});
+
+app.post('/api/chat/abort', async (c) => {
+  const body = await readJsonObject(c);
+  const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey.trim() : '';
+  if (!sessionKey) {
+    return c.json({ ok: false, error: 'sessionKey is required' }, 400);
+  }
+
+  try {
+    return c.json(await gatewayRpcCall('chat.abort', { sessionKey }));
+  } catch (error) {
+    return c.json({ ok: false, error: errorMessage(error) }, 502);
+  }
+});
+
+app.post('/api/chat/refresh', async (c) => {
+  const body = await readJsonObject(c);
+  const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey.trim() : '';
+  if (!sessionKey) {
+    return c.json({ ok: false, error: 'sessionKey is required' }, 400);
+  }
+  const cursor = typeof body.cursor === 'number' ? parseCursor(String(body.cursor)) : 0;
+  const limit = typeof body.limit === 'number' ? Math.min(Math.max(Math.floor(body.limit), 1), 1000) : 500;
+
+  try {
+    return c.json(await buildSnapshot(sessionKey, cursor, limit));
   } catch (error) {
     return c.json({ ok: false, error: errorMessage(error) }, 502);
   }
