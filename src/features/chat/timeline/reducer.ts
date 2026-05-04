@@ -263,22 +263,39 @@ function hasEquivalentHistoryToolGroup(state: ChatTimelineState, item: ChatTimel
     return false;
   }
 
-  const preview = toolPreviewText(item.chatMsg);
-  if (!preview) return false;
-
   return state.items.some((candidate) => {
-    if (candidate.kind !== 'tool_call' || candidate.chatMsg.role !== 'tool') return false;
-    if (candidate.source !== 'history' || !candidate.chatMsg.toolGroup?.length) return false;
-    if (Math.abs(candidate.timestamp - item.timestamp) > DUPLICATE_TOOL_WINDOW_MS) return false;
-    if (hasInterveningUserMessage(state, candidate, item)) return false;
-
-    const names = toolNames(item.chatMsg);
-    const groupNames = toolNames(candidate.chatMsg);
-    if ([...names].some((name) => groupNames.has(name))) return true;
-
-    const groupPreview = toolPreviewText(candidate.chatMsg);
-    return groupPreview.includes(preview) || preview.includes(groupPreview);
+    if (candidate.source !== 'history') return false;
+    return areEquivalentToolItems(state, candidate, item);
   });
+}
+
+function areEquivalentToolItems(
+  state: ChatTimelineState,
+  historyItem: ChatTimelineItem,
+  realtimeItem: ChatTimelineItem,
+): boolean {
+  if (historyItem.kind !== 'tool_call' || historyItem.chatMsg.role !== 'tool') return false;
+  if (realtimeItem.kind !== 'tool_call' || realtimeItem.chatMsg.role !== 'tool') return false;
+  if (historyItem.source !== 'history' || realtimeItem.source !== 'realtime') return false;
+  if (Math.abs(historyItem.timestamp - realtimeItem.timestamp) > DUPLICATE_TOOL_WINDOW_MS) return false;
+  if (hasInterveningUserMessage(state, historyItem, realtimeItem)) return false;
+
+  const historyNames = toolNames(historyItem.chatMsg);
+  const realtimeNames = toolNames(realtimeItem.chatMsg);
+  if ([...realtimeNames].some((name) => historyNames.has(name))) return true;
+
+  const historyPreview = toolPreviewText(historyItem.chatMsg);
+  const realtimePreview = toolPreviewText(realtimeItem.chatMsg);
+  if (!historyPreview || !realtimePreview) return false;
+  return historyPreview.includes(realtimePreview) || realtimePreview.includes(historyPreview);
+}
+
+function removeEquivalentRealtimeToolItemsForHistory(
+  state: ChatTimelineState,
+  item: ChatTimelineItem,
+): void {
+  if (item.kind !== 'tool_call' || item.chatMsg.role !== 'tool' || item.source !== 'history') return;
+  state.items = state.items.filter((candidate) => !areEquivalentToolItems(state, item, candidate));
 }
 
 function upsertItem(
@@ -287,6 +304,7 @@ function upsertItem(
   options: { ignoredEquivalentIds?: Set<string> } = {},
 ): ChatTimelineState {
   const next = cloneState(state);
+  removeEquivalentRealtimeToolItemsForHistory(next, item);
   let existingIndex = next.items.findIndex((candidate) => candidate.id === item.id);
   if (existingIndex < 0 && hasEquivalentHistoryToolGroup(next, item)) {
     return next;

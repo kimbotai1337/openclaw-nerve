@@ -475,6 +475,54 @@ describe('chat timeline reducer', () => {
     expect(messages[0].toolGroup).toHaveLength(2);
   });
 
+  it('deduplicates history tool bubbles against existing live tool bubbles after session reload', () => {
+    let state = createChatTimelineState(sessionKey);
+
+    state = reduceTimelineEvent(state, {
+      type: 'tool_started',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      toolCallId: 'tool-1',
+      name: 'exec',
+      args: { command: 'true' },
+      description: 'exec true',
+      timestamp: 2_000,
+    });
+    state = reduceTimelineEvent(state, {
+      type: 'tool_started',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      toolCallId: 'tool-2',
+      name: 'cron',
+      args: { action: 'status' },
+      description: 'cron status',
+      timestamp: 2_100,
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        {
+          role: 'assistant',
+          timestamp: 2_000,
+          content: [
+            { type: 'toolCall', name: 'exec', arguments: { command: 'true' } },
+            { type: 'toolCall', name: 'cron', arguments: { action: 'status' } },
+          ],
+        },
+      ],
+    });
+
+    const messages = selectTimelineMessages(state);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].toolGroup).toHaveLength(2);
+  });
+
   it('keeps repeated live tool calls when a later user prompt separates them from history', () => {
     let state = createChatTimelineState(sessionKey);
     state = reduceTimelineEvent(state, {
