@@ -31,7 +31,7 @@ export function transcriptItemId(params: {
   msg: ChatMsg;
   index?: number;
 }): string {
-  const { sessionKey, runId, msg } = params;
+  const { sessionKey, msg } = params;
   const timestamp = timestampMs(msg);
   const thinking = msg.isThinking ? 'thinking' : 'message';
   const text = normalizeForId(msg.rawText || msg.html || '');
@@ -39,7 +39,6 @@ export function transcriptItemId(params: {
   return [
     'history',
     encodeURIComponent(sessionKey),
-    runId ? encodeURIComponent(runId) : 'no-run',
     roleForId(msg.role),
     thinking,
     grouped,

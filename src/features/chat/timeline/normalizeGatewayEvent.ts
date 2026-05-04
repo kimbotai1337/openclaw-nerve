@@ -1,4 +1,4 @@
-import type { GatewayEvent } from '@/types';
+import type { ChatMessage, GatewayEvent } from '@/types';
 import {
   classifyStreamEvent,
   extractFinalMessages,
@@ -8,7 +8,31 @@ import { describeToolUse } from '@/utils/helpers';
 import type { ChatTimelineEvent } from './types';
 
 function eventTimestamp(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function gatewayTimestamp(event: GatewayEvent): number | undefined {
+  return eventTimestamp(event.ts);
+}
+
+function messageTimestamp(message: ChatMessage | string | undefined): number | undefined {
+  if (!message || typeof message === 'string') return undefined;
+  return eventTimestamp(message.timestamp)
+    ?? eventTimestamp(message.createdAt)
+    ?? eventTimestamp(message.ts);
+}
+
+function finalMessagesTimestamp(messages: ChatMessage[]): number | undefined {
+  for (const message of [...messages].reverse()) {
+    const timestamp = messageTimestamp(message);
+    if (timestamp !== undefined) return timestamp;
+  }
+  return undefined;
 }
 
 export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] {
@@ -30,7 +54,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
     };
 
     if (classified.type === 'chat_started') {
-      return [{ ...base, type: 'run_started', timestamp: Date.now() }];
+      return [{ ...base, type: 'run_started', timestamp: gatewayTimestamp(event) ?? Date.now() }];
     }
 
     if (classified.type === 'chat_delta') {
@@ -40,17 +64,18 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
         ...base,
         type: 'assistant_delta',
         text: delta.cleaned,
-        timestamp: Date.now(),
+        timestamp: messageTimestamp(payload.message) ?? gatewayTimestamp(event) ?? Date.now(),
       }];
     }
 
     if (classified.type === 'chat_final') {
+      const messages = extractFinalMessages(payload);
       return [{
         ...base,
         type: 'assistant_final',
-        messages: extractFinalMessages(payload),
+        messages,
         stopReason: payload.stopReason,
-        timestamp: Date.now(),
+        timestamp: finalMessagesTimestamp(messages) ?? gatewayTimestamp(event) ?? Date.now(),
       }];
     }
 
@@ -59,7 +84,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
         ...base,
         type: 'run_error',
         error: payload.errorMessage || payload.error || 'Chat run failed',
-        timestamp: Date.now(),
+        timestamp: gatewayTimestamp(event) ?? Date.now(),
       }];
     }
 
@@ -68,7 +93,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
         ...base,
         type: 'run_aborted',
         stopReason: payload.stopReason,
-        timestamp: Date.now(),
+        timestamp: gatewayTimestamp(event) ?? Date.now(),
       }];
     }
   }
@@ -81,7 +106,7 @@ export function normalizeGatewayEvent(event: GatewayEvent): ChatTimelineEvent[] 
       source: 'realtime' as const,
       seq: classified.chatSeq,
       frameSeq: classified.frameSeq,
-      timestamp: eventTimestamp((payload as { ts?: unknown }).ts) ?? Date.now(),
+      timestamp: eventTimestamp((payload as { ts?: unknown }).ts) ?? gatewayTimestamp(event) ?? Date.now(),
     };
 
     if (classified.type === 'lifecycle_start') {

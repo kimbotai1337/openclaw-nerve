@@ -158,6 +158,7 @@ export interface GatewayEvent {
   event: string;
   payload?: unknown;
   seq?: number;
+  ts?: string | number;
   stateVersion?: { presence: number; health: number };
 }
 

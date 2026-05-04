@@ -120,6 +120,8 @@ export function ledgerRecordToGatewayEvent(record: ChatLedgerRecord): GatewayEve
   return {
     type: 'event',
     event: record.type,
+    seq: record.cursor,
+    ts: record.ts,
     payload: record.payload,
   };
 }

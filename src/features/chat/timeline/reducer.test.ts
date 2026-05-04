@@ -130,6 +130,76 @@ describe('chat timeline reducer', () => {
     ]);
   });
 
+  it('orders replayed assistant finals between their surrounding history messages', () => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'first prompt', timestamp: 1_000 },
+        { role: 'user', content: 'second prompt', timestamp: 3_000 },
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'assistant_final',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      timestamp: 2_000,
+      messages: [
+        { role: 'assistant', content: 'first answer', timestamp: 2_000 },
+      ],
+    });
+    state = reduceTimelineEvent(state, {
+      type: 'assistant_final',
+      sessionKey,
+      runId: 'run-2',
+      source: 'realtime',
+      timestamp: 4_000,
+      messages: [
+        { role: 'assistant', content: 'second answer', timestamp: 4_000 },
+      ],
+    });
+
+    expect(selectTimelineMessages(state).map((m) => m.rawText)).toEqual([
+      'first prompt',
+      'first answer',
+      'second prompt',
+      'second answer',
+    ]);
+  });
+
+  it('does not stack replayed final assistant messages already present in history', () => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'prompt', timestamp: 1_000 },
+        { role: 'assistant', content: 'same answer', timestamp: 2_000 },
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'assistant_final',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      timestamp: 2_000,
+      messages: [
+        { role: 'assistant', content: 'same answer', timestamp: 2_000 },
+      ],
+    });
+
+    expect(selectTimelineMessages(state).map((m) => m.rawText)).toEqual([
+      'prompt',
+      'same answer',
+    ]);
+  });
+
   it('projects thinking blocks from transcript history', () => {
     const items = projectTranscriptMessages({
       sessionKey,

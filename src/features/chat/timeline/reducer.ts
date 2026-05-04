@@ -236,6 +236,6 @@ export function reduceTimelineEvent(
 
 export function selectTimelineMessages(state: ChatTimelineState): ChatMsg[] {
   return [...state.items]
-    .sort((a, b) => a.order - b.order)
+    .sort((a, b) => (a.timestamp - b.timestamp) || (a.order - b.order))
     .map((item) => item.chatMsg);
 }

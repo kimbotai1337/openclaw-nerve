@@ -39,6 +39,8 @@ describe('chatClient', () => {
     })).toEqual({
       type: 'event',
       event: 'agent',
+      seq: 7,
+      ts: 10,
       payload: { sessionKey: 'agent:test:main', runId: 'run-1' },
     });
   });
