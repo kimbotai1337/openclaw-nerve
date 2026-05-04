@@ -343,6 +343,14 @@ describe('appendActivityEntry', () => {
     expect(result[1].id).toBe('2');
   });
 
+  it('does not append duplicate entries for the same tool call', () => {
+    const log = [{ id: '1', toolName: 'a', description: 'a', startedAt: 1, phase: 'running' as const }];
+    const entry = { id: '1', toolName: 'a', description: 'a', startedAt: 2, phase: 'running' as const };
+    const result = appendActivityEntry(log, entry);
+    expect(result).toHaveLength(1);
+    expect(result[0].startedAt).toBe(1);
+  });
+
   it('caps at maxEntries', () => {
     const log = Array.from({ length: 6 }, (_, i) => ({
       id: String(i), toolName: 'x', description: 'x', startedAt: i, phase: 'running' as const,

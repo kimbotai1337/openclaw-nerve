@@ -136,7 +136,10 @@ app.get('/api/chat/events', async (c) => {
 
     for (const record of chatLedger.replay(sessionKey, cursor).events) {
       await writeRecord(record);
+      if (!connected) break;
     }
+
+    if (!connected) return;
 
     chatLedger.on('event', writeRecord);
     stream.onAbort(() => disconnect());

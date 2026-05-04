@@ -184,6 +184,22 @@ function optimisticItemId(sessionKey: string, msg: ChatMsg): string {
   return `optimistic:${encodeURIComponent(sessionKey)}:${encodeURIComponent(localId)}`;
 }
 
+function hasInterveningUserMessage(
+  state: ChatTimelineState,
+  candidate: ChatTimelineItem,
+  item: ChatTimelineItem,
+): boolean {
+  const candidateIndex = state.items.findIndex((existing) => existing.id === candidate.id);
+  return state.items.some((existing, index) => {
+    if (existing.kind !== 'user_message') return false;
+    if (candidate.timestamp <= item.timestamp) {
+      if (existing.timestamp > candidate.timestamp && existing.timestamp <= item.timestamp) return true;
+      return existing.timestamp === candidate.timestamp && index > candidateIndex;
+    }
+    return existing.timestamp >= item.timestamp && existing.timestamp < candidate.timestamp;
+  });
+}
+
 function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem): number {
   const canCollapseAssistantFinal =
     item.kind === 'assistant_message' &&
@@ -205,6 +221,12 @@ function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem
     if (candidate.kind !== item.kind || candidate.chatMsg.role !== item.chatMsg.role) return;
     if (canCollapseAssistantFinal && candidate.status !== 'final') return;
     if (
+      canCollapseAssistantFinal &&
+      candidate.runId &&
+      item.runId &&
+      candidate.runId !== item.runId
+    ) return;
+    if (
       canCollapseOptimisticUser &&
       candidate.source !== 'optimistic' &&
       item.source !== 'optimistic'
@@ -216,6 +238,7 @@ function equivalentMessageIndex(state: ChatTimelineState, item: ChatTimelineItem
       candidate.id !== item.id
     ) return;
     if (normalizedAssistantText(candidate.chatMsg) !== text) return;
+    if (canCollapseAssistantFinal && hasInterveningUserMessage(state, candidate, item)) return;
 
     const distance = Math.abs(candidate.timestamp - item.timestamp);
     if (distance <= DUPLICATE_MESSAGE_WINDOW_MS && distance < bestDistance) {
@@ -239,6 +262,7 @@ function hasEquivalentHistoryToolGroup(state: ChatTimelineState, item: ChatTimel
     if (candidate.kind !== 'tool_call' || candidate.chatMsg.role !== 'tool') return false;
     if (candidate.source !== 'history' || !candidate.chatMsg.toolGroup?.length) return false;
     if (Math.abs(candidate.timestamp - item.timestamp) > DUPLICATE_TOOL_WINDOW_MS) return false;
+    if (hasInterveningUserMessage(state, candidate, item)) return false;
 
     const names = toolNames(item.chatMsg);
     const groupNames = toolNames(candidate.chatMsg);

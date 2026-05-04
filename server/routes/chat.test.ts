@@ -144,4 +144,16 @@ describe('chat routes', () => {
       cursor: 1,
     });
   });
+
+  it('does not retain an SSE listener when replay serialization fails before subscription', async () => {
+    const circular: Record<string, unknown> = { sessionKey: 'agent:test:main' };
+    circular.self = circular;
+    chatLedger.append('agent:test:main', 'chat', circular, 10);
+
+    const app = buildApp();
+    const res = await app.request('/api/chat/events?sessionKey=agent%3Atest%3Amain&cursor=0');
+    await res.text();
+
+    expect(chatLedger.listenerCount('event')).toBe(0);
+  });
 });

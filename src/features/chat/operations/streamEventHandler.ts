@@ -264,6 +264,7 @@ export function appendActivityEntry(
   entry: ActivityLogEntry,
   maxEntries = 6,
 ): ActivityLogEntry[] {
+  if (log.some((existing) => existing.id === entry.id)) return log;
   const next = [...log, entry];
   return next.length > maxEntries ? next.slice(-maxEntries) : next;
 }
