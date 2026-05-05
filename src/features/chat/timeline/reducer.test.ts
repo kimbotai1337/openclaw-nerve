@@ -449,6 +449,35 @@ describe('chat timeline reducer', () => {
     ]);
   });
 
+  it('deduplicates replayed final assistant messages when ledger and history timestamps drift', () => {
+    let state = createChatTimelineState(sessionKey);
+    state = reduceTimelineEvent(state, {
+      type: 'history_snapshot',
+      sessionKey,
+      source: 'history',
+      messages: [
+        { role: 'user', content: 'prompt', timestamp: 1_000 },
+        { role: 'assistant', content: 'same answer', timestamp: 2_000 },
+      ],
+    });
+
+    state = reduceTimelineEvent(state, {
+      type: 'assistant_final',
+      sessionKey,
+      runId: 'run-1',
+      source: 'realtime',
+      timestamp: 18_000,
+      messages: [
+        { role: 'assistant', content: 'same answer', timestamp: 18_000 },
+      ],
+    });
+
+    expect(selectTimelineMessages(state).map((m) => m.rawText)).toEqual([
+      'prompt',
+      'same answer',
+    ]);
+  });
+
   it('keeps repeated final assistant replies when a later user prompt separates them', () => {
     let state = createChatTimelineState(sessionKey);
     state = reduceTimelineEvent(state, {

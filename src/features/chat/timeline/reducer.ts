@@ -44,7 +44,7 @@ function liveToolItemId(sessionKey: string, runId: string, toolCallId: string): 
   return `live:${encodeURIComponent(sessionKey)}:${encodeURIComponent(runId)}:tool:${encodeURIComponent(toolCallId)}`;
 }
 
-const DUPLICATE_MESSAGE_WINDOW_MS = 15_000;
+const DUPLICATE_MESSAGE_WINDOW_MS = 60_000;
 const DUPLICATE_TOOL_WINDOW_MS = 60_000;
 
 function normalizeMessageText(text: string): string {
