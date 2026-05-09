@@ -30,6 +30,16 @@ export interface GatewayFileWithContent extends GatewayFileEntry {
   content: string;
 }
 
+export interface GatewayEventMessage {
+  type: 'event';
+  event: string;
+  payload?: unknown;
+  seq?: number;
+  stateVersion?: unknown;
+}
+
+export type GatewayEventListener = (event: GatewayEventMessage) => void;
+
 // ── Persistent connection ────────────────────────────────────────────
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -64,6 +74,19 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let connectPromise: Promise<void> | null = null;
 let connectResolve: (() => void) | null = null;
 let connectReject: ((err: Error) => void) | null = null;
+const gatewayEventListeners = new Set<GatewayEventListener>();
+
+export function subscribeGatewayEvents(listener: GatewayEventListener): () => void {
+  gatewayEventListeners.add(listener);
+  ensureConnection();
+
+  let subscribed = true;
+  return () => {
+    if (!subscribed) return;
+    subscribed = false;
+    gatewayEventListeners.delete(listener);
+  };
+}
 
 function normalizeOrigin(value: string | undefined | null): string | null {
   if (!value) return null;
@@ -121,6 +144,7 @@ function buildConnectParams(nonce: string) {
     role,
     scopes,
     auth: { token },
+    caps: ['tool-events'],
     device: createDeviceBlock({
       clientId,
       clientMode,
@@ -130,6 +154,26 @@ function buildConnectParams(nonce: string) {
       nonce,
     }),
   };
+}
+
+function isGatewayEventMessage(value: unknown): value is GatewayEventMessage {
+  return isRecord(value) && value.type === 'event' && typeof value.event === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function notifyGatewayEventListeners(event: GatewayEventMessage): void {
+  for (const listener of [...gatewayEventListeners]) {
+    if (!gatewayEventListeners.has(listener)) continue;
+
+    try {
+      listener(event);
+    } catch (err) {
+      console.warn('[gateway-rpc] Gateway event subscriber failed:', err);
+    }
+  }
 }
 
 /** Send a raw message, ensuring the connection is ready. */
@@ -229,7 +273,12 @@ function ensureConnection(): void {
         return;
       }
 
-      // Ignore other events (chat messages, etc.)
+      if (isGatewayEventMessage(msg)) {
+        notifyGatewayEventListeners(msg);
+        return;
+      }
+
+      // Ignore other messages.
     } catch {
       // Ignore parse errors
     }

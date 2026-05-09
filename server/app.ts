@@ -29,6 +29,7 @@ import agentLogRoutes from './routes/agent-log.js';
 import tokensRoutes from './routes/tokens.js';
 import memoriesRoutes from './routes/memories.js';
 import eventsRoutes from './routes/events.js';
+import chatRuntimeRoutes from './routes/chat-runtime.js';
 import serverInfoRoutes from './routes/server-info.js';
 import codexLimitsRoutes from './routes/codex-limits.js';
 import claudeCodeLimitsRoutes from './routes/claude-code-limits.js';
@@ -52,6 +53,7 @@ import beadsRoutes from './routes/beads.js';
 // activity routes removed — tab dropped from workspace panel
 
 const app = new Hono();
+const STATIC_FILE_EXTENSION_PATTERN = /\.(?:avif|css|csv|eot|gif|html?|ico|jpe?g|js|json|map|mjs|mp3|mp4|ogg|otf|png|svg|ttf|txt|wasm|webmanifest|webm|webp|woff2?|xml)$/i;
 
 // ── Middleware ────────────────────────────────────────────────────────
 
@@ -78,7 +80,11 @@ app.use(
 app.use('*', authMiddleware);
 // Apply compression to all routes except SSE (compression buffers chunks and breaks streaming)
 app.use('*', async (c, next) => {
-  if (c.req.path === '/api/events' || c.req.path === '/api/files/raw') return next();
+  if (
+    c.req.path === '/api/events' ||
+    c.req.path === '/api/chat-runtime/stream' ||
+    c.req.path === '/api/files/raw'
+  ) return next();
   return compress()(c, next);
 });
 app.use('*', cacheHeaders);
@@ -87,7 +93,7 @@ app.use('*', cacheHeaders);
 
 const routes = [
   healthRoutes, authRoutes, ttsRoutes, transcribeRoutes, agentLogRoutes,
-  tokensRoutes, memoriesRoutes, eventsRoutes, serverInfoRoutes,
+  tokensRoutes, memoriesRoutes, eventsRoutes, chatRuntimeRoutes, serverInfoRoutes,
   codexLimitsRoutes, claudeCodeLimitsRoutes, versionRoutes, versionCheckRoutes,
   gatewayRoutes, connectDefaultsRoutes,
   workspaceRoutes, cronsRoutes, sessionsRoutes, skillsRoutes, filesRoutes, apiKeysRoutes,
@@ -103,9 +109,18 @@ app.use('*', async (c, next) => {
   if (c.req.path.startsWith('/api/')) return next();
   return serveStatic({ root: './dist/' })(c, next);
 });
-// SPA fallback — serve index.html for non-API routes (client-side routing)
+// SPA fallback — serve index.html only for extensionless app routes.
+// If a hashed asset or other static file is missing, return 404 instead of
+// silently serving index.html. That avoids stale post-upgrade bundles loading
+// HTML as JavaScript after a deploy/release switch.
 app.get('*', async (c, next) => {
   if (c.req.path.startsWith('/api/')) return next();
+
+  const looksLikeStaticFile = c.req.path.startsWith('/assets/') || STATIC_FILE_EXTENSION_PATTERN.test(c.req.path);
+  if (looksLikeStaticFile) {
+    return c.notFound();
+  }
+
   return serveStatic({ root: './dist/', path: 'index.html' })(c, next);
 });
 
