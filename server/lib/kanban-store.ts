@@ -14,9 +14,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { canonicalizeKanbanAssignee } from './kanban-assignee.js';
 import { createMutex } from './mutex.js';
+import { resolveProjectRoot } from './project-root.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -365,8 +365,7 @@ export class KanbanStore {
   private readonly legacyCandidatePaths: string[];
 
   constructor(filePath?: string) {
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const projectRoot = process.env.NERVE_PROJECT_ROOT || path.resolve(__dirname, '..', '..');
+    const projectRoot = resolveProjectRoot(import.meta.url);
     const dataRoot = process.env.NERVE_DATA_DIR || path.join(os.homedir() || process.cwd(), '.nerve');
     const dataDir = path.join(dataRoot, 'kanban');
     this.filePath = filePath || path.join(dataDir, 'tasks.json');

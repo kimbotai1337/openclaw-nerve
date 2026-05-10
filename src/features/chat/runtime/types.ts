@@ -1,5 +1,5 @@
 import type { ActivityLogEntry, ProcessingStage } from '@/contexts/ChatContext';
-import type { ChatMsg } from '@/features/chat/types';
+import type { ChatMsg, MessageImage, UploadAttachmentDescriptor } from '@/features/chat/types';
 
 export type TimelineHydrationState = 'cold' | 'hydrating' | 'ready' | 'stale';
 export type TimelineTurnStatus = 'running' | 'finalized' | 'failed' | 'aborted';
@@ -39,6 +39,8 @@ export interface UserTimelineItem extends TimelineItemBase {
   idempotencyKey?: string;
   messageId?: string;
   pending?: boolean;
+  images?: MessageImage[];
+  uploadAttachments?: UploadAttachmentDescriptor[];
 }
 
 export interface ThinkingTimelineItem extends TimelineItemBase {
@@ -120,6 +122,7 @@ export interface SessionTimeline {
 export type TimelinePatchOp =
   | { op: 'upsert_turn'; turn: TimelineTurn }
   | { op: 'upsert_item'; item: TimelineItem }
+  | { op: 'bind_user_message_run'; idempotencyKey: string; runId: string; at: number }
   | { op: 'remove_item'; id: string; reason: 'compaction' | 'user_reset' }
   | { op: 'remove_turn'; id: string; reason: 'compaction' | 'user_reset' }
   | { op: 'set_hydration_state'; state: TimelineHydrationState };

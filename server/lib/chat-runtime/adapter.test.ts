@@ -201,6 +201,115 @@ describe('OpenClaw chat runtime adapter', () => {
     ]);
   });
 
+  it('preserves user image content blocks from history snapshots', () => {
+    const events = adaptHistorySnapshot('agent:main:main', [
+      {
+        role: 'user',
+        messageId: 'msg-user-image',
+        timestamp: 1000,
+        content: [
+          { type: 'text', text: 'look at this' },
+          { type: 'image', data: 'aW5saW5lLWJhc2U2NA==', mimeType: 'image/png', name: 'inline.png' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'c291cmNlLWJhc2U2NA==', filename: 'source.jpg' } },
+          { type: 'image', data: 'aW5s\n aW5lLWJhc2U2NA==', mimeType: 'image/png', name: 'folded.png' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: '-_8', filename: 'urlsafe.png' } },
+          { type: 'image', data: 'not base64?', mimeType: 'image/gif', name: 'broken.gif' },
+        ],
+      },
+    ] as unknown as Parameters<typeof adaptHistorySnapshot>[1]);
+
+    expect(events.find((event) => event.type === 'user_message_committed')).toMatchObject({
+      type: 'user_message_committed',
+      text: 'look at this',
+      images: [
+        {
+          mimeType: 'image/png',
+          content: 'aW5saW5lLWJhc2U2NA==',
+          preview: 'data:image/png;base64,aW5saW5lLWJhc2U2NA==',
+          name: 'inline.png',
+        },
+        {
+          mimeType: 'image/jpeg',
+          content: 'c291cmNlLWJhc2U2NA==',
+          preview: 'data:image/jpeg;base64,c291cmNlLWJhc2U2NA==',
+          name: 'source.jpg',
+        },
+        {
+          mimeType: 'image/png',
+          content: 'aW5saW5lLWJhc2U2NA==',
+          preview: 'data:image/png;base64,aW5saW5lLWJhc2U2NA==',
+          name: 'folded.png',
+        },
+        {
+          mimeType: 'image/png',
+          content: '+/8=',
+          preview: 'data:image/png;base64,+/8=',
+          name: 'urlsafe.png',
+        },
+      ],
+    });
+
+    let timeline = createEmptyTimeline('agent:main:main');
+    for (const event of events) timeline = reduceRuntimeEvent(timeline, event);
+
+    const userItem = timelineItemsInOrder(timeline).find((item) => item.kind === 'user_message');
+    expect(userItem).toMatchObject({
+      kind: 'user_message',
+      images: [
+        { mimeType: 'image/png', content: 'aW5saW5lLWJhc2U2NA==', name: 'inline.png' },
+        { mimeType: 'image/jpeg', content: 'c291cmNlLWJhc2U2NA==', name: 'source.jpg' },
+        { mimeType: 'image/png', content: 'aW5saW5lLWJhc2U2NA==', name: 'folded.png' },
+        { mimeType: 'image/png', content: '+/8=', name: 'urlsafe.png' },
+      ],
+    });
+  });
+
+  it('preserves omitted user image blocks as session media references', () => {
+    const events = adaptHistorySnapshot('agent:main:main', [
+      {
+        role: 'user',
+        messageId: 'msg-user-omitted-image',
+        timestamp: 1775131617235,
+        content: [
+          { type: 'text', text: 'look at the omitted image' },
+          { type: 'image', omitted: true, mimeType: 'image/png' },
+        ],
+      },
+    ]);
+
+    expect(events.find((event) => event.type === 'user_message_committed')).toMatchObject({
+      type: 'user_message_committed',
+      text: 'look at the omitted image',
+      images: [
+        {
+          mimeType: 'image/png',
+          content: '',
+          preview: '/api/sessions/media?sessionKey=agent%3Amain%3Amain&timestamp=1775131617235&imageIndex=0',
+          name: 'message-1775131617235-image-0.png',
+        },
+      ],
+    });
+  });
+
+  it('does not synthesize omitted user image references without a persisted timestamp', () => {
+    const events = adaptHistorySnapshot('agent:main:main', [
+      {
+        role: 'user',
+        messageId: 'msg-user-untimed-image',
+        content: [
+          { type: 'text', text: 'untimed omitted image' },
+          { type: 'image', omitted: true, mimeType: 'image/png' },
+        ],
+      },
+    ]);
+
+    expect(events.find((event) => event.type === 'user_message_committed')).toMatchObject({
+      type: 'user_message_committed',
+      text: 'untimed omitted image',
+    });
+    expect(events.find((event) => event.type === 'user_message_committed')).not.toHaveProperty('images');
+  });
+
   it('uses thinking-block ordinals for mixed assistant history content', () => {
     const events = adaptHistorySnapshot('agent:main:main', [
       {

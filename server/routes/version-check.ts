@@ -6,13 +6,13 @@
 
 import { Hono } from 'hono';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { compareSemver, resolveLatestVersion } from '../lib/release-source.js';
+import { resolveProjectRoot } from '../lib/project-root.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf-8')) as {
+const projectDir = resolveProjectRoot(import.meta.url);
+const pkg = JSON.parse(readFileSync(resolve(projectDir, 'package.json'), 'utf-8')) as {
   version: string;
 };
 
@@ -24,7 +24,6 @@ interface VersionCache {
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 let cache: VersionCache | null = null;
-const projectDir = resolve(__dirname, '../..');
 
 const app = new Hono();
 

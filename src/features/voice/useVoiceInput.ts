@@ -140,7 +140,7 @@ export function resolveRecognitionLang(language: string): string {
 }
 
 export function useVoiceInput(
-  onTranscription: (text: string) => void,
+  onTranscription: (text: string) => void | Promise<void>,
   agentName: string = 'Agent',
   language: string = 'en',
   phrasesVersion: number = 0,
@@ -471,10 +471,10 @@ export function useVoiceInput(
     mr.onstop = async () => {
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
       stopStream();
+      let cleaned = '';
       try {
         const browserRecognitionSupported = Boolean(getSpeechRecognition());
         let browserTranscript = browserTranscriptRef.current.trim();
-        let cleaned = '';
 
         if (sttInputModeRef.current === 'local') {
           cleaned = await transcribeWithBackend(blob);
@@ -492,20 +492,28 @@ export function useVoiceInput(
           }
         }
 
-        if (cleaned) onTranscriptionRef.current(cleaned);
         setError(null);
       } catch (err) {
         console.error('Transcription failed:', err);
         setError(`Transcription failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         resetBrowserTranscript();
+        // Resume wake word listener
+        if (wakeWordEnabledRef.current) {
+          setVoiceState('listening');
+          ensureRecognitionRef.current('wake');
+        } else {
+          setVoiceState('idle');
+        }
       }
-      // Resume wake word listener
-      if (wakeWordEnabledRef.current) {
-        setVoiceState('listening');
-        ensureRecognitionRef.current('wake');
-      } else {
-        setVoiceState('idle');
+
+      if (cleaned) {
+        void Promise.resolve()
+          .then(() => onTranscriptionRef.current(cleaned))
+          .catch((err) => {
+            console.error('Send failed:', err);
+            setError(`Send failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
       }
     };
     mr.stop();

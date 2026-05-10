@@ -11,6 +11,7 @@ interface FakeRuntime {
   snapshot: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
   applyOptimisticUserMessage: ReturnType<typeof vi.fn>;
+  bindRunIdToOptimisticUserMessage: ReturnType<typeof vi.fn>;
   failOptimisticUserMessage: ReturnType<typeof vi.fn>;
   emitPatch: (patch: TimelinePatch) => void;
 }
@@ -317,7 +318,68 @@ describe('chat runtime routes', () => {
     const invalidRequests: RequestInit[] = [
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' },
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey: 'idem-1' }) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: '   ', idempotencyKey: 'idem-blank' }) },
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello', idempotencyKey: '   ' }) },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'hello',
+          idempotencyKey: 'idem-external-preview',
+          images: [{
+            mimeType: 'image/png',
+            content: 'base64-image',
+            preview: 'https://example.test/tracker.png',
+          }],
+        }),
+      },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'hello',
+          idempotencyKey: 'idem-bad-upload',
+          uploadPayload: {
+            descriptors: [{ name: 'missing-required-fields.png' }],
+            manifest: {
+              enabled: true,
+              exposeInlineBase64ToAgent: false,
+              allowSubagentForwarding: false,
+            },
+          },
+        }),
+      },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'hello',
+          idempotencyKey: 'idem-uppercase-inline-mode',
+          uploadPayload: {
+            descriptors: [{
+              id: 'att-uppercase-inline',
+              origin: 'upload',
+              mode: 'INLINE',
+              name: 'image.png',
+              mimeType: 'image/png',
+              sizeBytes: 100,
+              inline: {
+                encoding: 'base64',
+                base64: 'base64-image',
+                base64Bytes: 100,
+                previewUrl: 'data:image/png;base64,base64-image',
+                compressed: false,
+              },
+              policy: { forwardToSubagents: false },
+            }],
+            manifest: {
+              enabled: true,
+              exposeInlineBase64ToAgent: false,
+              allowSubagentForwarding: false,
+            },
+          },
+        }),
+      },
     ];
 
     for (const init of invalidRequests) {
@@ -329,11 +391,173 @@ describe('chat runtime routes', () => {
     }
   });
 
+  it('rejects image and upload payloads over the chat runtime schema limit', async () => {
+    const originalInlineLimit = process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB;
+    const originalMetadataLimit = process.env.NERVE_UPLOAD_INLINE_IMAGE_CONTEXT_MAX_BYTES;
+    process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB = '0.000001';
+    process.env.NERVE_UPLOAD_INLINE_IMAGE_CONTEXT_MAX_BYTES = '128';
+
+    try {
+      const { app } = await buildRouteApp();
+      const invalidRequests: RequestInit[] = [
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: 'hello',
+            idempotencyKey: 'idem-large-image',
+            images: [{ mimeType: 'image/png', content: 'abcde' }],
+          }),
+        },
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: 'hello',
+            idempotencyKey: 'idem-large-preview',
+            images: [{ mimeType: 'image/png', content: 'AA', preview: `data:image/png;base64,${'A'.repeat(200)}` }],
+          }),
+        },
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: 'hello',
+            idempotencyKey: 'idem-large-image-name',
+            images: [{ mimeType: 'image/png', content: 'AA', name: 'A'.repeat(500) }],
+          }),
+        },
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: 'hello',
+            idempotencyKey: 'idem-large-inline',
+            uploadPayload: {
+              descriptors: [
+                {
+                  id: 'att-large',
+                  origin: 'upload',
+                  mode: 'inline',
+                  name: 'large.png',
+                  mimeType: 'image/png',
+                  sizeBytes: 4,
+                  inline: {
+                    encoding: 'base64',
+                    base64: 'abcd',
+                    base64Bytes: 4,
+                    compressed: false,
+                  },
+                  policy: { forwardToSubagents: false },
+                },
+              ],
+              manifest: {
+                enabled: true,
+                exposeInlineBase64ToAgent: false,
+                allowSubagentForwarding: false,
+              },
+            },
+          }),
+        },
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: 'hello',
+            idempotencyKey: 'idem-large-upload-metadata',
+            uploadPayload: {
+              descriptors: [
+                {
+                  id: 'att-large-metadata',
+                  origin: 'upload',
+                  mode: 'file_reference',
+                  name: 'large-metadata.png',
+                  mimeType: 'image/png',
+                  sizeBytes: 4,
+                  reference: {
+                    kind: 'local_path',
+                    path: `/workspace/${'A'.repeat(200)}.png`,
+                    uri: `file:///workspace/${'A'.repeat(200)}.png`,
+                  },
+                  preparation: { reason: 'A'.repeat(200) },
+                  policy: { forwardToSubagents: false },
+                },
+              ],
+              manifest: {
+                enabled: true,
+                exposeInlineBase64ToAgent: false,
+                allowSubagentForwarding: false,
+              },
+            },
+          }),
+        },
+      ];
+
+      for (const init of invalidRequests) {
+        const res = await app.request('/api/chat-runtime/sessions/session-post/messages', init);
+        expect(res.status).toBe(400);
+        const json = await res.json() as { ok: boolean; error: string };
+        expect(json.ok).toBe(false);
+        expect(json.error).toBeTruthy();
+      }
+    } finally {
+      if (originalInlineLimit === undefined) {
+        delete process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB;
+      } else {
+        process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB = originalInlineLimit;
+      }
+      if (originalMetadataLimit === undefined) {
+        delete process.env.NERVE_UPLOAD_INLINE_IMAGE_CONTEXT_MAX_BYTES;
+      } else {
+        process.env.NERVE_UPLOAD_INLINE_IMAGE_CONTEXT_MAX_BYTES = originalMetadataLimit;
+      }
+    }
+  });
+
+  it('accepts padded base64 content at the configured byte limit', async () => {
+    const originalInlineLimit = process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB;
+    process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB = '0.000001';
+
+    try {
+      const runtime = createFakeRuntime();
+      const { app } = await buildRouteApp(runtime);
+      gatewayRpcCallMock.mockResolvedValue({ runId: 'run-one-byte-image' });
+
+      const res = await app.request('/api/chat-runtime/sessions/agent%3Amain%3Amain/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'one byte image',
+          idempotencyKey: 'idem-one-byte-image',
+          images: [{ mimeType: 'image/png', content: 'AA==' }],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(runtime.applyOptimisticUserMessage).toHaveBeenCalledWith(expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            mimeType: 'image/png',
+            content: 'AA==',
+            preview: 'data:image/png;base64,AA==',
+          }),
+        ],
+      }));
+    } finally {
+      if (originalInlineLimit === undefined) {
+        delete process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB;
+      } else {
+        process.env.NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB = originalInlineLimit;
+      }
+    }
+  });
+
   it('applies an optimistic user message, sends chat.send, and returns cursor/runId', async () => {
     const optimisticPatch = createPatch('agent:main:main', '17');
     const runBindingPatch = createPatch('agent:main:main', '18');
     const runtime = createFakeRuntime({
-      applyOptimisticUserMessage: vi.fn((input: { runId?: string }) => input.runId ? runBindingPatch : optimisticPatch),
+      applyOptimisticUserMessage: vi.fn(() => optimisticPatch),
+      bindRunIdToOptimisticUserMessage: vi.fn(() => runBindingPatch),
     });
     const { app } = await buildRouteApp(runtime);
     gatewayRpcCallMock.mockResolvedValue({ runId: 'run-123' });
@@ -356,9 +580,9 @@ describe('chat runtime routes', () => {
       deliver: false,
       idempotencyKey: 'idem-123',
     });
-    expect(runtime.applyOptimisticUserMessage).toHaveBeenNthCalledWith(2, {
+    expect(runtime.applyOptimisticUserMessage).toHaveBeenCalledTimes(1);
+    expect(runtime.bindRunIdToOptimisticUserMessage).toHaveBeenCalledWith({
       sessionKey: 'agent:main:main',
-      text: 'hello runtime',
       idempotencyKey: 'idem-123',
       runId: 'run-123',
     });
@@ -368,6 +592,184 @@ describe('chat runtime routes', () => {
       runId: 'run-123',
       cursor: '18',
     });
+  });
+
+  it('applies media metadata to optimistic runtime sends and forwards gateway attachments', async () => {
+    const optimisticPatch = createPatch('agent:main:main', '17');
+    const runBindingPatch = createPatch('agent:main:main', '18');
+    const runtime = createFakeRuntime({
+      applyOptimisticUserMessage: vi.fn(() => optimisticPatch),
+      bindRunIdToOptimisticUserMessage: vi.fn(() => runBindingPatch),
+    });
+    const { app } = await buildRouteApp(runtime);
+    gatewayRpcCallMock.mockResolvedValue({ runId: 'run-media' });
+
+    const res = await app.request('/api/chat-runtime/sessions/agent%3Amain%3Amain/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'look at this',
+        idempotencyKey: 'idem-media',
+        images: [
+          {
+            mimeType: 'image/png',
+            content: 'base64-image',
+            preview: 'data:image/png;base64,base64-image',
+            name: 'image.png',
+          },
+        ],
+        uploadPayload: {
+          descriptors: [
+            {
+              id: 'att-1',
+              origin: 'upload',
+              mode: 'inline',
+              name: 'image.png',
+              mimeType: 'image/png',
+              sizeBytes: 100,
+              inline: {
+                encoding: 'base64',
+                base64: 'base64-image',
+                base64Bytes: 100,
+                compressed: false,
+              },
+              policy: { forwardToSubagents: false },
+            },
+          ],
+          manifest: {
+            enabled: true,
+            exposeInlineBase64ToAgent: false,
+            allowSubagentForwarding: false,
+          },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(runtime.applyOptimisticUserMessage).toHaveBeenNthCalledWith(1, {
+      sessionKey: 'agent:main:main',
+      text: 'look at this',
+      idempotencyKey: 'idem-media',
+      images: [
+        {
+          mimeType: 'image/png',
+          content: 'base64-image',
+          preview: 'data:image/png;base64,base64-image',
+          name: 'image.png',
+        },
+      ],
+      uploadAttachments: [
+        expect.objectContaining({ id: 'att-1', name: 'image.png' }),
+      ],
+    });
+    expect(gatewayRpcCallMock).toHaveBeenCalledWith('chat.send', expect.objectContaining({
+      sessionKey: 'agent:main:main',
+      message: expect.stringContaining('<nerve-upload-manifest>'),
+      deliver: false,
+      idempotencyKey: 'idem-media',
+      attachments: [{ mimeType: 'image/png', content: 'base64-image' }],
+    }));
+    const gatewayMessage = gatewayRpcCallMock.mock.calls[0]?.[1]?.message as string;
+    expect(gatewayMessage).toContain('"base64":""');
+    expect(runtime.applyOptimisticUserMessage).toHaveBeenCalledTimes(1);
+    expect(runtime.bindRunIdToOptimisticUserMessage).toHaveBeenCalledWith({
+      sessionKey: 'agent:main:main',
+      idempotencyKey: 'idem-media',
+      runId: 'run-media',
+    });
+  });
+
+  it('redacts inline upload descriptor data before writing optimistic runtime state', async () => {
+    const runtime = createFakeRuntime();
+    const { app } = await buildRouteApp(runtime);
+    gatewayRpcCallMock.mockResolvedValue({ runId: 'run-redacted-media' });
+
+    const res = await app.request('/api/chat-runtime/sessions/agent%3Amain%3Amain/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'look at this',
+        idempotencyKey: 'idem-redacted-media',
+        uploadPayload: {
+          descriptors: [
+            {
+              id: 'att-redacted',
+              origin: 'upload',
+              mode: 'inline',
+              name: 'image.png',
+              mimeType: 'image/png',
+              sizeBytes: 100,
+              inline: {
+                encoding: 'base64',
+                base64: 'base64-image',
+                base64Bytes: 100,
+                previewUrl: 'data:image/png;base64,base64-image',
+                compressed: false,
+              },
+              policy: { forwardToSubagents: false },
+            },
+          ],
+          manifest: {
+            enabled: true,
+            exposeInlineBase64ToAgent: false,
+            allowSubagentForwarding: false,
+          },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(runtime.applyOptimisticUserMessage).toHaveBeenCalledWith(expect.objectContaining({
+      uploadAttachments: [
+        expect.objectContaining({
+          inline: expect.objectContaining({
+            base64: '',
+            base64Bytes: 100,
+            previewUrl: undefined,
+          }),
+        }),
+      ],
+    }));
+  });
+
+  it('accepts image-only runtime sends', async () => {
+    const runtime = createFakeRuntime();
+    const { app } = await buildRouteApp(runtime);
+    gatewayRpcCallMock.mockResolvedValue({ runId: 'run-image-only' });
+
+    const res = await app.request('/api/chat-runtime/sessions/agent%3Amain%3Amain/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: '',
+        idempotencyKey: 'idem-image-only',
+        images: [
+          {
+            mimeType: 'image/png',
+            content: 'base64-image',
+          },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(runtime.applyOptimisticUserMessage).toHaveBeenNthCalledWith(1, {
+      sessionKey: 'agent:main:main',
+      text: '',
+      idempotencyKey: 'idem-image-only',
+      images: [
+        {
+          mimeType: 'image/png',
+          content: 'base64-image',
+          preview: 'data:image/png;base64,base64-image',
+          name: 'image',
+        },
+      ],
+    });
+    expect(gatewayRpcCallMock).toHaveBeenCalledWith('chat.send', expect.objectContaining({
+      message: '',
+      attachments: [{ mimeType: 'image/png', content: 'base64-image' }],
+    }));
   });
 
   it('marks the server-side optimistic message failed when chat.send fails', async () => {
@@ -460,6 +862,7 @@ function createFakeRuntime(overrides: Partial<FakeRuntime> = {}): FakeRuntime {
       return () => subscribers.delete(subscriber);
     }),
     applyOptimisticUserMessage: vi.fn(({ sessionKey }: { sessionKey: string }) => createPatch(sessionKey, '1')),
+    bindRunIdToOptimisticUserMessage: vi.fn(({ sessionKey }: { sessionKey: string }) => createPatch(sessionKey, '3')),
     failOptimisticUserMessage: vi.fn(({ sessionKey }: { sessionKey: string }) => createPatch(sessionKey, '2')),
     emitPatch: (patch: TimelinePatch) => {
       for (const subscriber of [...subscribers]) subscriber(patch);

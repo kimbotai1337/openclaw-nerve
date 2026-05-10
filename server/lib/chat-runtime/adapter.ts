@@ -1,4 +1,4 @@
-import type { HistoryContentBlock, HistoryMessage, RuntimeEvent } from './types.js';
+import type { HistoryContentBlock, HistoryMessage, RuntimeEvent, TimelineMessageImage } from './types.js';
 
 export interface AdapterGatewayEvent {
   type: 'event';
@@ -45,7 +45,8 @@ export function adaptHistorySnapshot(sessionKey: string, messages: HistoryMessag
 
     if (message.role === 'user') {
       const text = extractText(message);
-      if (text === undefined) return;
+      const images = extractImageBlocks(sessionKey, message);
+      if (text === undefined && images.length === 0) return;
 
       const explicitRunId = readNonEmptyString(message, 'runId');
       const runId = explicitRunId ?? historyUserRunId(message, messageIndex);
@@ -53,13 +54,14 @@ export function adaptHistorySnapshot(sessionKey: string, messages: HistoryMessag
         type: 'user_message_committed',
         sessionKey,
         runId,
-        text,
+        text: text ?? '',
         at,
       };
       const messageId = historyMessageIdentity(message);
       const idempotencyKey = readNonEmptyString(message, 'idempotencyKey');
       if (messageId) event.messageId = messageId;
       if (idempotencyKey) event.idempotencyKey = idempotencyKey;
+      if (images.length > 0) event.images = images;
       events.push(event);
       if (!explicitRunId) noteFinalizableUserRun(runId, at);
       return;
@@ -525,6 +527,84 @@ function extractText(value: unknown): string | undefined {
   }
 
   return typeof value.text === 'string' ? value.text : undefined;
+}
+
+interface ImageBlockContext {
+  sessionKey: string;
+  messageTimestampMs?: number;
+  imageIndex: number;
+}
+
+function imageBlockToMessageImage(block: HistoryContentBlock, context: ImageBlockContext): TimelineMessageImage | null {
+  if (block.data && block.mimeType) {
+    const content = normalizeBase64(block.data);
+    if (!content) return null;
+    return {
+      mimeType: block.mimeType,
+      content,
+      preview: `data:${block.mimeType};base64,${content}`,
+      name: block.name || 'image',
+    };
+  }
+
+  const source = block.source;
+  if (source?.data && source.media_type) {
+    const content = normalizeBase64(source.data);
+    if (!content) return null;
+
+    return {
+      mimeType: source.media_type,
+      content,
+      preview: `data:${source.media_type};base64,${content}`,
+      name: source.filename || block.name || 'image',
+    };
+  }
+
+  if (!block.omitted || !Number.isFinite(context.messageTimestampMs)) return null;
+  const mimeType = block.mimeType || source?.media_type || 'image/png';
+  const timestamp = context.messageTimestampMs as number;
+  const extension = imageExtensionFromMimeType(mimeType);
+  return {
+    mimeType,
+    content: '',
+    preview: `/api/sessions/media?sessionKey=${encodeURIComponent(context.sessionKey)}&timestamp=${timestamp}&imageIndex=${context.imageIndex}`,
+    name: `message-${timestamp}-image-${context.imageIndex}.${extension}`,
+  };
+}
+
+function imageExtensionFromMimeType(mimeType?: string): string {
+  if (!mimeType?.startsWith('image/')) return 'png';
+  const subtype = mimeType.slice('image/'.length).toLowerCase();
+  if (subtype === 'jpeg') return 'jpg';
+  return subtype || 'png';
+}
+
+function normalizeBase64(value: string): string | null {
+  let normalized = value.replace(/\s+/g, '');
+  if (!normalized) return null;
+  normalized = normalized.replace(/-/g, '+').replace(/_/g, '/');
+  if (normalized.length % 4 === 1) return null;
+  const padding = (4 - (normalized.length % 4)) % 4;
+  if (padding > 0) normalized += '='.repeat(padding);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return null;
+  return normalized;
+}
+
+function extractImageBlocks(sessionKey: string, message: HistoryMessage): TimelineMessageImage[] {
+  if (!Array.isArray(message.content)) return [];
+
+  const timestamp = messageTimeIdentity(message);
+  let imageIndex = 0;
+  const images: TimelineMessageImage[] = [];
+
+  for (const block of message.content) {
+    if (block.type !== 'image') continue;
+    const image = imageBlockToMessageImage(block, { sessionKey, messageTimestampMs: timestamp, imageIndex });
+    if (image) images.push(image);
+    imageIndex += 1;
+  }
+
+  return images;
 }
 
 function toolFinishedEvent(

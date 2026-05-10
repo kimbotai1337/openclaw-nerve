@@ -228,6 +228,18 @@ function hasResolvableLocalPath(file: File): boolean {
   return Boolean(fileWithPath.path || fileWithPath.webkitRelativePath);
 }
 
+function getInlineImageMaxBytes(config: UploadFeatureConfig): number {
+  return config.exposeInlineBase64ToAgent
+    ? config.inlineImageContextMaxBytes
+    : getInlineAttachmentMaxBytes(config);
+}
+
+function inlineImageBudgetLabel(config: UploadFeatureConfig): string {
+  return config.exposeInlineBase64ToAgent
+    ? 'context-safe budget'
+    : 'gateway attachment budget';
+}
+
 async function importBrowserUploadsToCanonicalReferences(files: File[]): Promise<CanonicalUploadReference[]> {
   const formData = new FormData();
   files.forEach((file) => formData.append('files', file, file.name));
@@ -277,6 +289,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deferredResizeFrameRef = useRef<number | null>(null);
   const deferredResizeSettledFrameRef = useRef<number | null>(null);
+  const hasHydratedDraftRef = useRef(false);
   const [draftText, setDraftText] = useState(() => persistedComposerSnapshot.text);
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>(() => persistedComposerSnapshot.stagedAttachments);
   const [uploadConfig, setUploadConfig] = useState<UploadFeatureConfig>(DEFAULT_UPLOAD_FEATURE_CONFIG);
@@ -389,7 +402,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useEffect(() => {
     const input = inputRef.current;
     if (!input) return;
-    if (input.value !== draftText) {
+    if (hasHydratedDraftRef.current) return;
+
+    hasHydratedDraftRef.current = true;
+    if (input.value === '' && draftText) {
       input.value = draftText;
     }
     resizeInput();
@@ -505,7 +521,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   const effectiveSttInputMode = sttProvider === 'openai' ? 'local' : sttInputMode;
 
-  const { voiceState, interimTranscript, wakeWordEnabled, toggleWakeWord, error: voiceError, clearError: clearVoiceError } = useVoiceInput((text) => {
+  const { voiceState, interimTranscript, wakeWordEnabled, toggleWakeWord, error: voiceError, clearError: clearVoiceError } = useVoiceInput(async (text) => {
     const input = inputRef.current;
     if (input) {
       input.value = '';
@@ -514,7 +530,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       input.style.opacity = '';
     }
     setDraftText('');
-    onSend('[voice] ' + text);
+    await onSend('[voice] ' + text);
+    clearVoiceError();
   }, agentName, voiceLang, voicePhrasesVersion, effectiveSttInputMode);
 
   // Live transcription preview: write interim transcript to textarea during recording
@@ -557,6 +574,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     if (selected.length === 0) return;
     setAttachmentError(null);
 
+    const input = inputRef.current;
+    if (input && input.value !== draftText) {
+      setDraftText(input.value);
+    }
+
     if (!uploadsEnabled) {
       setAttachmentError('Uploads are disabled by configuration.');
       return;
@@ -574,7 +596,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     }
 
     const inlineCapBytes = getInlineAttachmentMaxBytes(uploadConfig);
-    const accepted: File[] = [];
+    const accepted: Array<{ file: File; mode: UploadMode }> = [];
     let firstError: string | null = null;
 
     for (const file of filesToStage) {
@@ -597,14 +619,35 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         continue;
       }
 
-      accepted.push(file);
+      accepted.push({ file, mode: defaultMode });
     }
 
     if (accepted.length > 0) {
       try {
-        const staged = await importBrowserUploadsToCanonicalReferences(accepted);
-        const next = staged.map((artifact, index) => {
-          const sourceFile = accepted[index];
+        const referenceFiles = accepted
+          .filter((item) => item.mode === 'file_reference')
+          .map((item) => item.file);
+        const references = referenceFiles.length > 0
+          ? await importBrowserUploadsToCanonicalReferences(referenceFiles)
+          : [];
+        let referenceIndex = 0;
+
+        const next = accepted.map(({ file, mode }) => {
+          if (mode === 'inline') {
+            return {
+              id: crypto.randomUUID ? crypto.randomUUID() : `att-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              file,
+              origin: 'upload' as const,
+              mode,
+              previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+            };
+          }
+
+          const artifact = references[referenceIndex++];
+          if (!artifact) {
+            throw new Error(`Failed to resolve upload reference for "${file.name}".`);
+          }
+          const sourceFile = file;
           const mimeType = artifact.mimeType || sourceFile?.type || 'application/octet-stream';
           const stagedFile = createServerPathBackedFile({
             name: sourceFile?.name || artifact.originalName,
@@ -632,7 +675,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     if (firstError) {
       setAttachmentError(firstError);
     }
-  }, [stagedAttachments.length, uploadConfig, uploadsEnabled]);
+  }, [draftText, stagedAttachments.length, uploadConfig, uploadsEnabled]);
 
   // Drag & drop handlers (exposed via className on parent)
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -798,9 +841,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     preparation?: UploadPreparationMetadata;
   }> => {
     if (item.file.type.startsWith('image/')) {
+      const inlineImageMaxBytes = getInlineImageMaxBytes(uploadConfig);
       const compressed = await compressImage(item.file, {
-        contextMaxBytes: uploadConfig.inlineImageContextMaxBytes,
-        contextTargetBytes: Math.floor(uploadConfig.inlineImageContextMaxBytes * 0.9),
+        contextMaxBytes: inlineImageMaxBytes,
+        contextTargetBytes: Math.floor(inlineImageMaxBytes * 0.9),
         maxDimension: uploadConfig.inlineImageMaxDimension,
         minDimension: uploadConfig.inlineImageShrinkMinDimension,
         webpQuality: uploadConfig.inlineImageWebpQuality,
@@ -817,11 +861,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           sourceMode: 'inline',
           finalMode: 'inline',
           outcome: 'optimized_inline',
-          reason: `Adaptive inline shrink fit within the context-safe budget (${formatFileSize(compressed.bytes)} <= ${formatFileSize(uploadConfig.inlineImageContextMaxBytes)}).`,
+          reason: `Adaptive inline shrink fit within the ${inlineImageBudgetLabel(uploadConfig)} (${formatFileSize(compressed.bytes)} <= ${formatFileSize(inlineImageMaxBytes)}).`,
           originalMimeType: item.file.type || 'application/octet-stream',
           originalSizeBytes: item.file.size,
           inlineBase64Bytes: compressed.bytes,
-          contextSafetyMaxBytes: uploadConfig.inlineImageContextMaxBytes,
+          contextSafetyMaxBytes: inlineImageMaxBytes,
           inlineTargetBytes: compressed.targetBytes,
           inlineChosenWidth: compressed.width,
           inlineChosenHeight: compressed.height,
@@ -844,10 +888,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       },
     };
   }, [
-    uploadConfig.inlineImageMaxDimension,
-    uploadConfig.inlineImageWebpQuality,
-    uploadConfig.inlineImageContextMaxBytes,
-    uploadConfig.inlineImageShrinkMinDimension,
+    uploadConfig,
   ]);
 
   const buildInlineDescriptor = useCallback((
@@ -898,6 +939,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     const { attachment: inlineAttachment, preparation } = await buildInlineAttachment(item);
     const inlineBase64Bytes = getBase64ByteLength(inlineAttachment.content);
     const localPathAvailable = hasResolvableLocalPath(item.file);
+    const inlineImageMaxBytes = getInlineImageMaxBytes(uploadConfig);
 
     if (!item.file.type.startsWith('image/')) {
       return {
@@ -914,7 +956,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       };
     }
 
-    if (inlineBase64Bytes <= uploadConfig.inlineImageContextMaxBytes) {
+    if (inlineBase64Bytes <= inlineImageMaxBytes) {
       return {
         inlineAttachment,
         descriptor: buildInlineDescriptor(item, inlineAttachment, {
@@ -924,17 +966,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           outcome: 'optimized_inline',
           reason: preparation?.inlineBase64Bytes != null && preparation.inlineTargetBytes != null && preparation.inlineBase64Bytes <= preparation.inlineTargetBytes
             ? `Adaptive inline shrink fit under the target budget (${formatFileSize(preparation.inlineBase64Bytes)} <= ${formatFileSize(preparation.inlineTargetBytes)}).`
-            : `Adaptive inline shrink fit within the context-safe budget (${formatFileSize(inlineBase64Bytes)} <= ${formatFileSize(uploadConfig.inlineImageContextMaxBytes)}).`,
+            : `Adaptive inline shrink fit within the ${inlineImageBudgetLabel(uploadConfig)} (${formatFileSize(inlineBase64Bytes)} <= ${formatFileSize(inlineImageMaxBytes)}).`,
           originalMimeType: item.file.type || 'application/octet-stream',
           originalSizeBytes: item.file.size,
           inlineBase64Bytes,
-          contextSafetyMaxBytes: uploadConfig.inlineImageContextMaxBytes,
+          contextSafetyMaxBytes: inlineImageMaxBytes,
           localPathAvailable,
         }),
       };
     }
 
-    const fallbackReason = `Adaptive inline shrinking hit the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) without reaching the context-safe budget.`;
+    const fallbackReason = `Adaptive inline shrinking hit the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) without reaching the ${inlineImageBudgetLabel(uploadConfig)}.`;
 
     if (
       item.origin === 'server_path'
@@ -948,12 +990,50 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           sourceMode: 'inline',
           finalMode: 'file_reference',
           outcome: 'downgraded_to_file_reference',
-          reason: `${fallbackReason} Falling back to file reference (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(uploadConfig.inlineImageContextMaxBytes)}).`,
+          reason: `${fallbackReason} Falling back to file reference (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(inlineImageMaxBytes)}).`,
           originalMimeType: item.file.type || 'application/octet-stream',
           originalSizeBytes: item.file.size,
           inlineBase64Bytes,
-          contextSafetyMaxBytes: uploadConfig.inlineImageContextMaxBytes,
+          contextSafetyMaxBytes: inlineImageMaxBytes,
           inlineFallbackReason: 'minimum inline dimension reached; used file reference fallback',
+          localPathAvailable: true,
+        }),
+      };
+    }
+
+    if (
+      item.origin === 'upload'
+      && uploadConfig.inlineImageAutoDowngradeToFileReference
+      && uploadConfig.fileReferenceEnabled
+    ) {
+      const [reference] = await importBrowserUploadsToCanonicalReferences([item.file]);
+      if (!reference) {
+        throw new Error(`Failed to resolve upload reference for "${item.file.name}".`);
+      }
+      const fallbackFile = createServerPathBackedFile({
+        name: item.file.name || reference.originalName,
+        absolutePath: reference.absolutePath,
+        sizeBytes: reference.sizeBytes,
+        mimeType: reference.mimeType || item.file.type || 'application/octet-stream',
+      });
+
+      return {
+        descriptor: await buildFileReferenceDescriptor({
+          ...item,
+          file: fallbackFile,
+          mode: 'file_reference',
+          relativePath: reference.canonicalPath,
+        }, {
+          ...preparation,
+          sourceMode: 'inline',
+          finalMode: 'file_reference',
+          outcome: 'downgraded_to_file_reference',
+          reason: `${fallbackReason} Imported browser upload as a file reference (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(inlineImageMaxBytes)}).`,
+          originalMimeType: item.file.type || 'application/octet-stream',
+          originalSizeBytes: item.file.size,
+          inlineBase64Bytes,
+          contextSafetyMaxBytes: inlineImageMaxBytes,
+          inlineFallbackReason: 'minimum inline dimension reached; used imported file reference fallback',
           localPathAvailable: true,
         }),
       };
@@ -961,23 +1041,22 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
     if (item.origin === 'upload') {
       throw new Error(
-        `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) and browser uploads cannot preserve a true file-reference fallback (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(uploadConfig.inlineImageContextMaxBytes)}). Send a smaller image or browse by path.`,
+        uploadConfig.fileReferenceEnabled
+          ? `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) and file-reference fallback is disabled for this upload (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(inlineImageMaxBytes)}). Send a smaller image or browse by path.`
+          : `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) and file-reference mode is disabled (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(inlineImageMaxBytes)}). Send a smaller image or enable file-reference mode.`,
       );
     }
 
     throw new Error(
       uploadConfig.fileReferenceEnabled
-        ? `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) and no file-reference fallback was available (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(uploadConfig.inlineImageContextMaxBytes)}).`
-        : `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(uploadConfig.inlineImageContextMaxBytes)}). Enable file-reference mode or choose a smaller image.`,
+        ? `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) and no file-reference fallback was available (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(inlineImageMaxBytes)}).`
+        : `"${item.file.name}" was blocked after adaptive inline shrinking reached the minimum dimension (${uploadConfig.inlineImageShrinkMinDimension}px) (${formatFileSize(inlineBase64Bytes)} > ${formatFileSize(inlineImageMaxBytes)}). Enable file-reference mode or choose a smaller image.`,
     );
   }, [
     buildFileReferenceDescriptor,
     buildInlineAttachment,
     buildInlineDescriptor,
-    uploadConfig.fileReferenceEnabled,
-    uploadConfig.inlineImageAutoDowngradeToFileReference,
-    uploadConfig.inlineImageContextMaxBytes,
-    uploadConfig.inlineImageShrinkMinDimension,
+    uploadConfig,
   ]);
 
   const handleSend = useCallback(async () => {

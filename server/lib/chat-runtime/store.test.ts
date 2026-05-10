@@ -1484,6 +1484,119 @@ describe('ChatRuntime', () => {
     }
   });
 
+  it('binds optimistic user messages to real run IDs without replaying media payloads', () => {
+    const runtime = new ChatRuntime({
+      maxPatchesPerSession: 10,
+      rpc: async () => ({ messages: [] }),
+    });
+
+    runtime.applyOptimisticUserMessage({
+      sessionKey: 'agent:optimistic-media:main',
+      text: 'look',
+      idempotencyKey: 'idem-media-bind',
+      images: [{
+        mimeType: 'image/png',
+        content: 'base64-image',
+        preview: 'data:image/png;base64,base64-image',
+        name: 'image.png',
+      }],
+      uploadAttachments: [{
+        id: 'att-1',
+        origin: 'upload',
+        mode: 'inline',
+        name: 'image.png',
+        mimeType: 'image/png',
+        sizeBytes: 100,
+        inline: {
+          encoding: 'base64',
+          base64: 'base64-image',
+          base64Bytes: 100,
+          compressed: false,
+        },
+        policy: { forwardToSubagents: false },
+      }],
+      at: 1000,
+    });
+
+    const bindPatch = runtime.bindRunIdToOptimisticUserMessage({
+      sessionKey: 'agent:optimistic-media:main',
+      idempotencyKey: 'idem-media-bind',
+      runId: 'run-real',
+      at: 1001,
+    });
+
+    expect(bindPatch.ops).toEqual([
+      {
+        op: 'bind_user_message_run',
+        idempotencyKey: 'idem-media-bind',
+        runId: 'run-real',
+        at: 1001,
+      },
+    ]);
+    expect(JSON.stringify(bindPatch)).not.toContain('base64-image');
+    expect(runtime.snapshot('agent:optimistic-media:main', 'manual').timeline.turns).toMatchObject([
+      { runId: 'run-real' },
+    ]);
+  });
+
+  it('does not scan unrelated media payloads while detecting run binding patches', () => {
+    const runtime = new ChatRuntime({
+      maxPatchesPerSession: 10,
+      rpc: async () => ({ messages: [] }),
+    });
+
+    runtime.applyOptimisticUserMessage({
+      sessionKey: 'agent:optimistic-media:main',
+      text: 'older media prompt',
+      idempotencyKey: 'idem-unrelated-media',
+      images: [{
+        mimeType: 'image/png',
+        content: 'unrelated-large-media-payload',
+        preview: 'data:image/png;base64,unrelated-large-media-payload',
+        name: 'older.png',
+      }],
+      uploadAttachments: [{
+        id: 'att-unrelated',
+        origin: 'upload',
+        mode: 'inline',
+        name: 'older.png',
+        mimeType: 'image/png',
+        sizeBytes: 100,
+        inline: {
+          encoding: 'base64',
+          base64: 'unrelated-large-media-payload',
+          base64Bytes: 100,
+          compressed: false,
+        },
+        policy: { forwardToSubagents: false },
+      }],
+      at: 1000,
+    });
+    runtime.applyOptimisticUserMessage({
+      sessionKey: 'agent:optimistic-media:main',
+      text: 'new prompt',
+      idempotencyKey: 'idem-bind-target',
+      at: 1001,
+    });
+
+    const stringifySpy = vi.spyOn(JSON, 'stringify');
+    runtime.bindRunIdToOptimisticUserMessage({
+      sessionKey: 'agent:optimistic-media:main',
+      idempotencyKey: 'idem-bind-target',
+      runId: 'run-real',
+      at: 1002,
+    });
+
+    const stringifyCalls = [...stringifySpy.mock.calls];
+    stringifySpy.mockRestore();
+
+    expect(stringifyCalls.some(([value]) =>
+      typeof value === 'object' &&
+      value !== null &&
+      JSON.stringify(value).includes('unrelated-large-media-payload'),
+    )).toBe(false);
+  });
+
   it('marks failed optimistic user messages terminal in the server timeline', () => {
     const runtime = new ChatRuntime({
       maxPatchesPerSession: 10,

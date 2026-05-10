@@ -1,6 +1,6 @@
 import { buildPatchFromTimeline, createEmptyTimeline, reduceRuntimeEvent, timelineItemsInOrder } from './reducer.js';
 import { ReplayBuffer, type ReplayResult } from './replay-buffer.js';
-import type { RuntimeEvent, SessionTimeline, TimelinePatch, TimelinePatchOp, TimelineSnapshot } from './types.js';
+import type { RuntimeEvent, SessionTimeline, TimelineItem, TimelinePatch, TimelinePatchOp, TimelineSnapshot, TimelineTurn, UserTimelineItem } from './types.js';
 
 interface ChatTimelineStoreOptions {
   maxPatchesPerSession: number;
@@ -182,6 +182,9 @@ export class ChatTimelineStore {
       ops.push({ op: 'set_hydration_state', state: next.hydrationState });
     }
 
+    const bindRunOp = bindUserMessageRunPatchOp(current, next);
+    if (bindRunOp) return [bindRunOp];
+
     for (const turn of next.turns) {
       const previous = currentTurnsById.get(turn.id);
       if (!previous || !sameTimelineValue(previous, turn)) {
@@ -231,4 +234,106 @@ function cloneSessionTimeline(timeline: SessionTimeline): SessionTimeline {
 
 function sameTimelineValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function bindUserMessageRunPatchOp(current: SessionTimeline, next: SessionTimeline): TimelinePatchOp | undefined {
+  if (current.hydrationState !== next.hydrationState) return undefined;
+  if (current.turns.length !== next.turns.length) return undefined;
+  if (!sameItemKeySet(current.items, next.items)) return undefined;
+
+  const candidate = findRunBindingCandidatePair(current, next);
+  if (!candidate) return undefined;
+
+  const [previousItem, nextItem] = candidate;
+  if (!isUserTimelineItem(previousItem) || !isUserTimelineItem(nextItem)) return undefined;
+  if (!nextItem.idempotencyKey || !nextItem.runId) return undefined;
+  if (previousItem.id !== nextItem.id || previousItem.idempotencyKey !== nextItem.idempotencyKey) return undefined;
+  if (sameTimelineValue(userItemWithoutRunBinding(previousItem), userItemWithoutRunBinding(nextItem)) === false) return undefined;
+
+  const currentTurnsById = new Map(current.turns.map((turn) => [turn.id, turn]));
+  const changedTurns: Array<readonly [TimelineTurn, TimelineTurn]> = [];
+  for (let index = 0; index < next.turns.length; index += 1) {
+    if (current.turns[index]?.id !== next.turns[index]?.id) return undefined;
+
+    const nextTurn = next.turns[index];
+    const previousTurn = currentTurnsById.get(nextTurn.id);
+    if (!previousTurn) return undefined;
+    if (sameTurnValue(previousTurn, nextTurn)) continue;
+    changedTurns.push([previousTurn, nextTurn] as const);
+  }
+  if (changedTurns.length > 1) return undefined;
+  if (changedTurns.length === 1) {
+    const [previousTurn, nextTurn] = changedTurns[0];
+    if (previousTurn.id !== previousItem.turnId || nextTurn.id !== nextItem.turnId) return undefined;
+    if (!sameTurnExceptRunBinding(previousTurn, nextTurn)) return undefined;
+  }
+
+  return {
+    op: 'bind_user_message_run',
+    idempotencyKey: nextItem.idempotencyKey,
+    runId: nextItem.runId,
+    at: nextItem.updatedAt,
+  };
+}
+
+function sameItemKeySet(
+  currentItems: Record<string, TimelineItem>,
+  nextItems: Record<string, TimelineItem>,
+): boolean {
+  const currentItemIds = Object.keys(currentItems);
+  const nextItemIds = Object.keys(nextItems);
+  if (currentItemIds.length !== nextItemIds.length) return false;
+  return nextItemIds.every((itemId) => Object.prototype.hasOwnProperty.call(currentItems, itemId));
+}
+
+function findRunBindingCandidatePair(
+  current: SessionTimeline,
+  next: SessionTimeline,
+): readonly [UserTimelineItem, UserTimelineItem] | undefined {
+  let candidate: readonly [UserTimelineItem, UserTimelineItem] | undefined;
+
+  for (const itemId of Object.keys(next.items)) {
+    const previousItem = current.items[itemId];
+    const nextItem = next.items[itemId];
+    if (previousItem === nextItem) continue;
+    if (!isUserTimelineItem(previousItem) || !isUserTimelineItem(nextItem)) return undefined;
+    if (previousItem.runId === nextItem.runId) return undefined;
+    if (!previousItem.runId?.startsWith('optimistic:') || !nextItem.runId) return undefined;
+    if (!nextItem.idempotencyKey || previousItem.idempotencyKey !== nextItem.idempotencyKey) return undefined;
+    if (candidate) return undefined;
+    candidate = [previousItem, nextItem] as const;
+  }
+
+  return candidate;
+}
+
+function isUserTimelineItem(item: TimelineItem | undefined): item is UserTimelineItem {
+  return item?.kind === 'user_message';
+}
+
+function userItemWithoutRunBinding(item: UserTimelineItem): unknown {
+  return { ...item, runId: undefined, updatedAt: undefined };
+}
+
+function sameTurnValue(left: TimelineTurn, right: TimelineTurn): boolean {
+  return left.runId === right.runId && sameTurnExceptRunBinding(left, right);
+}
+
+function sameTurnExceptRunBinding(left: TimelineTurn, right: TimelineTurn): boolean {
+  return left.id === right.id &&
+    left.sessionKey === right.sessionKey &&
+    left.status === right.status &&
+    left.startedAt === right.startedAt &&
+    left.finalizedAt === right.finalizedAt &&
+    sameOrderKey(left.orderBase, right.orderBase) &&
+    sameStringArray(left.inputItemIds, right.inputItemIds) &&
+    sameStringArray(left.outputItemIds, right.outputItemIds);
+}
+
+function sameOrderKey(left: TimelineTurn['orderBase'], right: TimelineTurn['orderBase']): boolean {
+  return left.turn === right.turn && left.block === right.block && left.sub === right.sub;
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

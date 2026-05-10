@@ -18,11 +18,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_VOICE_PHRASES, type LanguageVoicePhrases } from './constants.js';
+import { resolveProjectRoot } from './project-root.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+const PROJECT_ROOT = resolveProjectRoot(import.meta.url);
 const LEGACY_CONFIG_PATH = path.join(PROJECT_ROOT, 'voice-phrases.json');
 const CONFIG_PATH = process.env.NERVE_VOICE_PHRASES_PATH || path.join(process.env.HOME || os.homedir(), '.nerve', 'voice-phrases.json');
 

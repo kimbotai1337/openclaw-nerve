@@ -401,7 +401,7 @@ describe('InputBar', () => {
     expect(screen.queryByText('too-big.zip')).not.toBeInTheDocument();
   });
 
-  it('stages browser uploads into file-reference descriptors before send', async () => {
+  it('sends small browser image uploads inline with the text message', async () => {
     const onSend = vi.fn();
     render(<InputBar onSend={onSend} isGenerating={false} />);
 
@@ -424,7 +424,9 @@ describe('InputBar', () => {
       expect(onSend).toHaveBeenCalledTimes(1);
     });
 
-    expect(compressImage).not.toHaveBeenCalled();
+    expect(compressImage).toHaveBeenCalledWith(smallImage, expect.objectContaining({
+      contextMaxBytes: uploadConfigResponse.inlineAttachmentMaxMb * 1024 * 1024,
+    }));
 
     const [text, attachments, uploadPayload] = onSend.mock.calls[0] as [
       string,
@@ -433,6 +435,7 @@ describe('InputBar', () => {
         descriptors: Array<{
           origin: string;
           mode: string;
+          inline?: { base64: string; base64Bytes: number; compressed: boolean };
           reference?: { kind: string; path: string; uri: string };
           preparation?: {
             outcome: string;
@@ -441,27 +444,32 @@ describe('InputBar', () => {
       }?,
     ];
     expect(text).toBe('hello');
-    expect(attachments).toBeUndefined();
+    expect(attachments).toEqual([
+      expect.objectContaining({
+        mimeType: 'image/png',
+        content: 'mock-shot.png',
+        name: 'shot.png',
+      }),
+    ]);
     expect(uploadPayload?.descriptors).toHaveLength(1);
     expect(uploadPayload?.descriptors[0]).toMatchObject({
       origin: 'upload',
-      mode: 'file_reference',
-      reference: {
-        kind: 'local_path',
-        path: '/workspace/.temp/nerve-uploads/2026/03/21/1-shot.png',
-        uri: 'file:///workspace/.temp/nerve-uploads/2026/03/21/1-shot.png',
+      mode: 'inline',
+      inline: {
+        base64: 'mock-shot.png',
+        compressed: true,
       },
       preparation: {
-        outcome: 'file_reference_ready',
+        outcome: 'optimized_inline',
       },
     });
 
     const fetchUrls = vi.mocked(global.fetch).mock.calls.map(([input]) => String(input));
-    expect(fetchUrls.some((url) => url.includes('/api/upload-reference/resolve'))).toBe(true);
+    expect(fetchUrls.some((url) => url.includes('/api/upload-reference/resolve'))).toBe(false);
     expect(fetchUrls.some((url) => url.includes('/api/upload-stage'))).toBe(false);
   });
 
-  it('keeps large browser-uploaded images on the staged file-reference path', async () => {
+  it('compresses large browser-uploaded images onto the inline send path', async () => {
     const onSend = vi.fn();
 
     render(<InputBar onSend={onSend} isGenerating={false} />);
@@ -490,17 +498,27 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledTimes(1);
     });
-    expect(onSend.mock.calls[0][1]).toBeUndefined();
+    expect(compressImage).toHaveBeenCalledWith(image, expect.objectContaining({
+      contextMaxBytes: uploadConfigResponse.inlineAttachmentMaxMb * 1024 * 1024,
+    }));
+    expect(onSend.mock.calls[0][1]).toEqual([
+      expect.objectContaining({
+        mimeType: 'image/png',
+        content: 'mock-oversized-inline.png',
+        name: 'oversized-inline.png',
+      }),
+    ]);
     expect(onSend.mock.calls[0][2].descriptors[0]).toMatchObject({
       origin: 'upload',
-      mode: 'file_reference',
-      reference: {
-        path: '/workspace/.temp/nerve-uploads/2026/03/21/1-oversized-inline.png',
+      mode: 'inline',
+      inline: {
+        base64: 'mock-oversized-inline.png',
+        compressed: true,
       },
     });
   });
 
-  it('does not re-inline staged browser uploads during send preparation', async () => {
+  it('sends browser image uploads that fit the attachment cap even when they exceed the prompt context budget', async () => {
     const onSend = vi.fn();
     vi.mocked(compressImage).mockImplementation(async (file: File) => ({
       base64: 'x'.repeat(200_000),
@@ -541,8 +559,104 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledTimes(1);
     });
-    expect(compressImage).not.toHaveBeenCalled();
-    expect(onSend.mock.calls[0][2].descriptors[0].mode).toBe('file_reference');
+    expect(compressImage).toHaveBeenCalledWith(image, expect.objectContaining({
+      contextMaxBytes: uploadConfigResponse.inlineAttachmentMaxMb * 1024 * 1024,
+    }));
+    expect(onSend.mock.calls[0][1]).toEqual([
+      expect.objectContaining({
+        mimeType: 'image/png',
+        content: 'x'.repeat(200_000),
+        name: 'oversized-inline.png',
+      }),
+    ]);
+    expect(onSend.mock.calls[0][2].descriptors[0]).toMatchObject({
+      mode: 'inline',
+      inline: {
+        base64: 'x'.repeat(200_000),
+        compressed: true,
+      },
+    });
+  });
+
+  it('downgrades oversized exposed-inline browser images to file references', async () => {
+    uploadConfigResponse.exposeInlineBase64ToAgent = true;
+    uploadConfigResponse.inlineImageContextMaxBytes = 32_768;
+    const onSend = vi.fn();
+    vi.mocked(compressImage).mockImplementation(async (file: File) => ({
+      base64: 'x'.repeat(200_000),
+      mimeType: file.type || 'application/octet-stream',
+      preview: `data:${file.type};base64,oversized-${file.name}`,
+      width: 512,
+      height: 512,
+      bytes: 150_000,
+      iterations: 8,
+      attempts: [],
+      targetBytes: 29_491,
+      maxBytes: 32_768,
+      minDimension: 512,
+    }));
+
+    render(<InputBar onSend={onSend} isGenerating={false} />);
+
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'ship staged upload' } });
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await waitFor(() => {
+      expect(fileInput.accept).toBe('*/*');
+    });
+
+    const image = new File([new Uint8Array(80_000)], 'oversized-context.png', { type: 'image/png' });
+
+    fireEvent.change(fileInput, {
+      target: { files: [image] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('oversized-context.png')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Send message'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+    expect(compressImage).toHaveBeenCalledWith(image, expect.objectContaining({
+      contextMaxBytes: uploadConfigResponse.inlineImageContextMaxBytes,
+    }));
+
+    const [text, attachments, uploadPayload] = onSend.mock.calls[0] as [
+      string,
+      Array<{ mimeType: string; content: string; name: string }>?,
+      {
+        descriptors: Array<{
+          origin: string;
+          mode: string;
+          inline?: { base64: string };
+          reference?: { kind: string; path: string; uri: string };
+          preparation?: { outcome: string };
+        }>;
+      }?,
+    ];
+    expect(text).toBe('ship staged upload');
+    expect(attachments).toBeUndefined();
+    expect(uploadPayload?.descriptors).toHaveLength(1);
+    expect(uploadPayload?.descriptors[0]).toMatchObject({
+      origin: 'upload',
+      mode: 'file_reference',
+      reference: {
+        kind: 'local_path',
+        path: '/workspace/.temp/nerve-uploads/2026/03/21/1-oversized-context.png',
+        uri: 'file:///workspace/.temp/nerve-uploads/2026/03/21/1-oversized-context.png',
+      },
+      preparation: {
+        outcome: 'downgraded_to_file_reference',
+      },
+    });
+    expect(uploadPayload?.descriptors[0].inline).toBeUndefined();
+
+    const fetchUrls = vi.mocked(global.fetch).mock.calls.map(([input]) => String(input));
+    expect(fetchUrls.some((url) => url.includes('/api/upload-reference/resolve'))).toBe(true);
   });
 
   it('keeps browser uploads on the staged file-reference transport path', async () => {
@@ -647,7 +761,15 @@ describe('InputBar', () => {
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][2].descriptors[0].origin).toBe('upload');
-    expect(onSend.mock.calls[0][2].descriptors[0].mode).toBe('file_reference');
+    expect(onSend.mock.calls[0][1]).toEqual([
+      expect.objectContaining({
+        mimeType: 'image/png',
+        content: 'mock-inline-forwardable.png',
+        name: 'inline-forwardable.png',
+      }),
+    ]);
+    expect(onSend.mock.calls[0][2].descriptors[0].mode).toBe('inline');
+    expect(onSend.mock.calls[0][2].descriptors[0].inline.base64).toBe('mock-inline-forwardable.png');
     expect(onSend.mock.calls[0][2].descriptors[0].policy.forwardToSubagents).toBe(true);
     expect(onSend.mock.calls[0][2].manifest.allowSubagentForwarding).toBe(true);
   });

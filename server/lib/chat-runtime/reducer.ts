@@ -120,11 +120,63 @@ export function reduceRuntimeEvent(timeline: SessionTimeline, event: RuntimeEven
         pending: isHistoryBacked ? false : true,
         status: isHistoryBacked ? 'complete' : 'provisional',
         source: isHistoryBacked ? 'history' : 'optimistic',
+        images: event.images ?? existing?.images,
+        uploadAttachments: event.uploadAttachments ?? existing?.uploadAttachments,
       };
 
       draft.items[itemId] = item;
       detachInputItemFromOtherTurns(draft, itemId, turn.id);
       appendUnique(turn.inputItemIds, itemId);
+      break;
+    }
+
+    case 'user_message_run_bound': {
+      const itemId = userItemId({
+        sessionKey: event.sessionKey,
+        idempotencyKey: event.idempotencyKey,
+      });
+      const item = itemOfKind(draft.items[itemId], 'user_message')
+        ?? Object.values(draft.items).find((candidate) =>
+          candidate.kind === 'user_message' &&
+          candidate.idempotencyKey === event.idempotencyKey
+        );
+      if (!item || item.kind !== 'user_message') break;
+
+      const sourceTurn = item.turnId
+        ? draft.turns.find((candidate) => candidate.id === item.turnId)
+        : undefined;
+      const existingRunTurn = findExistingTurn(draft, event.runId);
+      const shouldMoveIntoExistingRunTurn = Boolean(
+        sourceTurn &&
+        existingRunTurn &&
+        existingRunTurn.id !== sourceTurn.id &&
+        isPromptOnlyInputTurn(sourceTurn, item.id),
+      );
+      const targetTurn = shouldMoveIntoExistingRunTurn ? existingRunTurn : sourceTurn;
+      const orderKey = shouldMoveIntoExistingRunTurn && targetTurn
+        ? orderKeyFor(targetTurn, USER_BLOCK, targetTurn.inputItemIds.length)
+        : item.orderKey;
+
+      draft.items[item.id] = {
+        ...item,
+        runId: event.runId,
+        turnId: targetTurn?.id ?? item.turnId,
+        orderKey,
+        updatedAt: Math.max(item.updatedAt, event.at),
+      };
+
+      if (shouldMoveIntoExistingRunTurn && sourceTurn && targetTurn) {
+        removeValue(sourceTurn.inputItemIds, item.id);
+        detachInputItemFromOtherTurns(draft, item.id, targetTurn.id);
+        appendUnique(targetTurn.inputItemIds, item.id);
+        neutralizeTurn(sourceTurn, event.at);
+      } else if (
+        sourceTurn &&
+        !isTerminalTurnStatus(sourceTurn.status) &&
+        (!existingRunTurn || existingRunTurn.id === sourceTurn.id)
+      ) {
+        sourceTurn.runId = event.runId;
+      }
       break;
     }
 

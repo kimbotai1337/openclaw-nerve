@@ -4,57 +4,11 @@
  * Extracted from ChatContext.handleSend. No React hooks, setState, or refs.
  */
 import { generateMsgId } from '@/features/chat/types';
-import type { ChatMsg, ImageAttachment, OutgoingUploadPayload, UploadAttachmentDescriptor } from '@/features/chat/types';
+import type { ChatMsg, ImageAttachment, OutgoingUploadPayload } from '@/features/chat/types';
 import { renderMarkdown, renderToolResults } from '@/utils/helpers';
+import { appendUploadManifest, applyVoiceTTSHint, sanitizeUploadDescriptor } from '../../../../shared/chat-upload-manifest';
 
-// ─── Voice → TTS prompt hint ───────────────────────────────────────────────────
-const VOICE_PREFIX = '[voice] ';
-const TTS_HINT = '\n\n[system: User sent a voice message. Always include your full text reply AND a [tts:...] marker so it plays back as audio. Never send only TTS markers — the response must be readable in chat too. TTS marker format: [tts: your spoken text here] — place it at the end of your reply. Example reply:\n\nHere is my text response.\n\n[tts: Here is my text response.]]';
-const UPLOAD_MANIFEST_OPEN = '<nerve-upload-manifest>';
-const UPLOAD_MANIFEST_CLOSE = '</nerve-upload-manifest>';
-
-/** Detect voice messages and append a TTS prompt hint for the agent. */
-export function applyVoiceTTSHint(text: string): string {
-  if (!text.startsWith(VOICE_PREFIX)) return text;
-  return text + TTS_HINT;
-}
-
-function sanitizeUploadDescriptor(
-  descriptor: UploadAttachmentDescriptor,
-  exposeInlineBase64ToAgent: boolean,
-): UploadAttachmentDescriptor {
-  if (descriptor.mode !== 'inline' || !descriptor.inline) {
-    return descriptor;
-  }
-
-  const inline = {
-    ...descriptor.inline,
-    previewUrl: undefined,
-    base64: exposeInlineBase64ToAgent ? descriptor.inline.base64 : '',
-  };
-
-  return {
-    ...descriptor,
-    inline,
-  };
-}
-
-export function appendUploadManifest(
-  text: string,
-  uploadPayload?: OutgoingUploadPayload,
-): string {
-  if (!uploadPayload?.manifest.enabled) return text;
-  if (uploadPayload.descriptors.length === 0) return text;
-
-  const manifest = {
-    version: 1,
-    attachments: uploadPayload.descriptors.map((descriptor) =>
-      sanitizeUploadDescriptor(descriptor, uploadPayload.manifest.exposeInlineBase64ToAgent),
-    ),
-  };
-
-  return `${text}\n\n${UPLOAD_MANIFEST_OPEN}${JSON.stringify(manifest)}${UPLOAD_MANIFEST_CLOSE}`;
-}
+export { appendUploadManifest, applyVoiceTTSHint };
 
 // ─── RPC type alias ────────────────────────────────────────────────────────────
 type RpcFn = (method: string, params: Record<string, unknown>) => Promise<unknown>;
@@ -157,25 +111,53 @@ export async function sendChatRuntimeMessage(params: {
   sessionKey: string;
   text: string;
   idempotencyKey: string;
+  images?: ImageAttachment[];
+  uploadPayload?: OutgoingUploadPayload;
   fetchImpl?: FetchFn;
 }): Promise<ChatRuntimeSendAck> {
-  const { sessionKey, text, idempotencyKey, fetchImpl = fetch } = params;
+  const { sessionKey, text, idempotencyKey, images, uploadPayload, fetchImpl = fetch } = params;
+  const runtimeUploadPayload = sanitizeRuntimeUploadPayload(uploadPayload);
+  const requestBody = {
+    text,
+    idempotencyKey,
+    ...(images?.length ? {
+      images: images.map((image) => ({
+        mimeType: image.mimeType,
+        content: image.content,
+        preview: image.preview,
+        name: image.name,
+      })),
+    } : {}),
+    ...(runtimeUploadPayload?.descriptors.length ? { uploadPayload: runtimeUploadPayload } : {}),
+  };
+
   const res = await fetchImpl(`/api/chat-runtime/sessions/${encodeURIComponent(sessionKey)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: applyVoiceTTSHint(text), idempotencyKey }),
+    body: JSON.stringify(requestBody),
   });
 
-  const body = await parseJsonBody(res);
+  const responseBody = await parseJsonBody(res);
 
-  if (!res.ok || !isRuntimeSendAck(body)) {
-    const error = isRuntimeSendError(body)
-      ? body.error
+  if (!res.ok || !isRuntimeSendAck(responseBody)) {
+    const error = isRuntimeSendError(responseBody)
+      ? responseBody.error
       : `chat runtime send failed with HTTP ${res.status}`;
     throw new Error(error);
   }
 
-  return body;
+  return responseBody;
+}
+
+function sanitizeRuntimeUploadPayload(uploadPayload: OutgoingUploadPayload | undefined): OutgoingUploadPayload | undefined {
+  if (!uploadPayload?.descriptors.length) return undefined;
+
+  return {
+    ...uploadPayload,
+    descriptors: uploadPayload.descriptors.map((descriptor) =>
+      sanitizeUploadDescriptor(descriptor, uploadPayload.manifest.exposeInlineBase64ToAgent),
+    ),
+  };
 }
 
 async function parseJsonBody(res: Response): Promise<unknown> {
