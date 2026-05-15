@@ -43,6 +43,11 @@ export function buildVoiceFallbackText(raw: string): string | null {
 interface UseChatTTSDeps {
   soundEnabled: React.RefObject<boolean>;
   speak: React.RefObject<(text: string) => void>;
+  /**
+   * Gates response speech from [tts:...] markers and voice fallbacks. This is
+   * intentionally separate from soundEnabled, which only controls UI cues.
+   */
+  speechEnabled?: React.RefObject<boolean>;
 }
 
 interface HandleFinalTTSOptions {
@@ -50,7 +55,7 @@ interface HandleFinalTTSOptions {
   completionPing?: boolean;
 }
 
-export function useChatTTS({ soundEnabled, speak }: UseChatTTSDeps) {
+export function useChatTTS({ soundEnabled, speak, speechEnabled = soundEnabled }: UseChatTTSDeps) {
   const lastMessageWasVoiceRef = useRef(false);
   const playedSoundsRef = useRef<Set<string>>(new Set());
 
@@ -77,12 +82,13 @@ export function useChatTTS({ soundEnabled, speak }: UseChatTTSDeps) {
 
     if (finalData?.ttsText && !playedSoundsRef.current.has(finalData.ttsText)) {
       playedSoundsRef.current.add(finalData.ttsText);
+      if (!speechEnabled.current) return false;
       speak.current(finalData.ttsText);
       return true;
     }
 
     const shouldUseVoiceFallback = options.voiceFallback ?? lastMessageWasVoiceRef.current;
-    if (!finalData?.ttsText && shouldUseVoiceFallback && finalData?.text) {
+    if (!finalData?.ttsText && speechEnabled.current && shouldUseVoiceFallback && finalData?.text) {
       // Voice fallback: agent forgot [tts:...] marker — auto-speak cleaned response
       const fallback = buildVoiceFallbackText(finalData.text);
       if (fallback) {
@@ -97,7 +103,7 @@ export function useChatTTS({ soundEnabled, speak }: UseChatTTSDeps) {
     }
 
     return false;
-  }, [soundEnabled, speak]);
+  }, [soundEnabled, speak, speechEnabled]);
 
   /** Play the completion ping sound if sound is enabled. */
   const playCompletionPing = useCallback(() => {
