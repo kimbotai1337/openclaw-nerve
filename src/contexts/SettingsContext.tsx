@@ -28,6 +28,7 @@ interface SettingsContextValue {
   liveTranscriptionPreview: boolean;
   toggleLiveTranscriptionPreview: () => void;
   speak: (text: string) => Promise<void>;
+  speakVoiceReply: (text: string) => Promise<void>;
   panelRatio: number;
   setPanelRatio: (ratio: number) => void;
   telemetryVisible: boolean;
@@ -165,6 +166,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return saved !== 'false';
   });
   const { speak } = useTTS(soundEnabled, ttsProvider, ttsModel || undefined);
+  const { speak: speakVoiceReply } = useTTS(true, ttsProvider, ttsModel || undefined);
   const wakeWordToggleRef = useRef<(() => void) | null>(null);
 
   // Apply theme on mount and when it changes
@@ -386,6 +388,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     liveTranscriptionPreview,
     toggleLiveTranscriptionPreview,
     speak,
+    speakVoiceReply,
     panelRatio,
     setPanelRatio,
     telemetryVisible,
@@ -410,6 +413,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     toggleKanbanVisible,
   }), [
     soundEnabled, toggleSound, ttsProvider, ttsModel, changeTtsProvider, changeTtsModel, toggleTtsProvider,
+    speakVoiceReply,
     sttProvider, changeSttProvider, sttInputMode, changeSttInputMode, sttModel, changeSttModel,
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,

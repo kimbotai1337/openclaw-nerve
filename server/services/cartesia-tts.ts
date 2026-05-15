@@ -40,7 +40,7 @@ export async function synthesizeCartesia(
   const resp = await fetch(CARTESIA_TTS_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.cartesiaApiKey}`,
+      'X-API-Key': config.cartesiaApiKey,
       'Cartesia-Version': CARTESIA_VERSION,
       'Content-Type': 'application/json',
     },

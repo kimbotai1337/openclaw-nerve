@@ -933,7 +933,8 @@ async function setup(options: {
   vi.doMock('./SettingsContext', () => ({
     useSettings: () => ({
       soundEnabled: options.soundEnabled ?? false,
-      speak: speakMock,
+      speak: vi.fn(),
+      speakVoiceReply: speakMock,
     }),
   }));
 

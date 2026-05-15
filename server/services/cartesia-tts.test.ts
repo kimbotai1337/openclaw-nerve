@@ -57,7 +57,7 @@ describe('synthesizeCartesia', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          Authorization: 'Bearer sk-car-test',
+          'X-API-Key': 'sk-car-test',
           'Cartesia-Version': '2026-03-01',
           'Content-Type': 'application/json',
         }),

@@ -77,7 +77,7 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 export function ChatProvider({ children }: { children: ReactNode }) {
   const { rpc } = useGateway();
   const { currentSession, sessions, agentStatus = {} } = useSessionContext();
-  const { soundEnabled, speak } = useSettings();
+  const { soundEnabled, speakVoiceReply } = useSettings();
   // Voice-response TTS should not depend on the optional "Sound effects" toggle.
   // That toggle gates pings/cues, but marker/fallback speech has its own
   // explicit trigger: the user sent a voice message and the assistant returned
@@ -91,7 +91,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const currentSessionRef = useRef(currentSession || '');
   const soundEnabledRef = useRef(soundEnabled);
-  const speakRef = useRef(speak);
+  const speakRef = useRef(speakVoiceReply);
   const runtimeMessagesRef = useRef<ChatMsg[]>([]);
   const catchupTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const ttsExpiryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -99,8 +99,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     currentSessionRef.current = currentSession || '';
     soundEnabledRef.current = soundEnabled;
-    speakRef.current = speak;
-  }, [currentSession, soundEnabled, speak]);
+    speakRef.current = speakVoiceReply;
+  }, [currentSession, soundEnabled, speakVoiceReply]);
 
   const runtime = useChatRuntime({
     sessionKey: currentSession || '',
