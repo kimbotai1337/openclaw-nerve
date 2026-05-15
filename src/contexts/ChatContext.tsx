@@ -78,6 +78,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const { rpc } = useGateway();
   const { currentSession, sessions, agentStatus = {} } = useSessionContext();
   const { soundEnabled, speak } = useSettings();
+  // Voice-response TTS should not depend on the optional "Sound effects" toggle.
+  // That toggle gates pings/cues, but marker/fallback speech has its own
+  // explicit trigger: the user sent a voice message and the assistant returned
+  // (or omitted) a [tts:...] marker. Keep a dedicated enabled ref for speech
+  // so marker playback still works when UI sounds are muted.
+  const ttsSpeechEnabledRef = useRef(true);
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [pendingSendCount, setPendingSendCount] = useState(0);
@@ -138,7 +144,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     ttsExpiryTimersRef.current.clear();
   }, []);
 
-  const ttsHook = useChatTTS({ soundEnabled: soundEnabledRef, speak: speakRef });
+  const ttsHook = useChatTTS({ soundEnabled: soundEnabledRef, speak: speakRef, speechEnabled: ttsSpeechEnabledRef });
   const { handleFinalTTS, playCompletionPing, resetPlayedSounds, trackVoiceMessage } = ttsHook;
   const displayMessages = useMemo(
     () => mergeOptimisticMessages(messages, optimisticSends),

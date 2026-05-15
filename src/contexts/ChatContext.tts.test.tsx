@@ -830,6 +830,63 @@ describe('ChatContext runtime TTS playback', () => {
     expect(speakMock).toHaveBeenCalledWith('Second spoken reply.');
     expect(speakMock).toHaveBeenCalledTimes(2);
   });
+
+  it('speaks TTS markers from voice turns even when sound effects are disabled', async () => {
+    const { ChatProvider, useChat, setRuntimeState, speakMock, playPingMock } = await setup({
+      soundEnabled: false,
+    });
+
+    let send: ((text: string) => Promise<void>) | null = null;
+
+    function Consumer() {
+      const chat = useChat();
+      useEffect(() => {
+        send = chat.handleSend;
+      }, [chat]);
+      return null;
+    }
+
+    const { rerender } = render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(send).not.toBeNull());
+
+    await act(async () => {
+      await send!('[voice] hello with muted ui sounds');
+    });
+
+    setRuntimeState({ isGenerating: true });
+    rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    setRuntimeState({
+      isGenerating: false,
+      messages: [{
+        msgId: 'assistant:main:run-1:answer',
+        role: 'assistant',
+        html: '<p>Visible reply.</p>',
+        rawText: 'Visible reply.',
+        timestamp: new Date(Date.now() + 1000),
+        ttsText: 'Spoken reply while muted.',
+      }],
+    });
+    rerender(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(speakMock).toHaveBeenCalledWith('Spoken reply while muted.'));
+    expect(speakMock).toHaveBeenCalledTimes(1);
+    expect(playPingMock).not.toHaveBeenCalled();
+  });
+
 });
 
 async function setup(options: {
