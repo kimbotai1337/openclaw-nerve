@@ -1,7 +1,7 @@
 /**
  * TTS voice configuration — reads/writes a JSON config file.
  *
- * All voice-related settings (OpenAI, Qwen/Replicate, Edge) live here
+ * All voice-related settings (OpenAI, Qwen/Replicate, Edge, Xiaomi, Cartesia) live here
  * instead of env vars or hardcoded values. On first run, default settings
  * are written to `<PROJECT_ROOT>/tts-config.json`. Subsequent reads merge
  * the on-disk config with defaults so new fields are always present.
@@ -54,7 +54,18 @@ export interface TTSVoiceConfig {
     /** Optional default Xiaomi style prompt */
     style: string;
   };
+  /** Cartesia TTS settings */
+  cartesia: {
+    /** Cartesia model id */
+    model: string;
+    /** Only supported voice name in Nerve UI */
+    voice: 'Skylar';
+    /** Cartesia Skylar voice id */
+    voiceId: string;
+  };
 }
+
+export const CARTESIA_SKYLAR_VOICE_ID = 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4';
 
 const DEFAULTS: TTSVoiceConfig = {
   qwen: {
@@ -77,6 +88,11 @@ const DEFAULTS: TTSVoiceConfig = {
     model: 'mimo-v2-tts',
     voice: 'mimo_default',
     style: '',
+  },
+  cartesia: {
+    model: 'sonic-3.5',
+    voice: 'Skylar',
+    voiceId: CARTESIA_SKYLAR_VOICE_ID,
   },
 };
 
@@ -230,5 +246,6 @@ export function getProviderLanguageSupport(): Record<string, { supported: boolea
     edge: getFallbackInfo('edge', lang),
     replicate: getFallbackInfo('replicate', lang),
     openai: getFallbackInfo('openai', lang),
+    cartesia: getFallbackInfo('cartesia', lang),
   };
 }

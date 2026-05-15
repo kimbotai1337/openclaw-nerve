@@ -177,6 +177,13 @@ export function createCommands(actions: CommandActions): Command[] {
       keywords: ['tts', 'voice', 'speech', 'edge', 'free'],
     },
     {
+      id: 'tts-cartesia',
+      label: 'TTS: Switch to Cartesia',
+      action: () => actions.onTtsProviderChange('cartesia' as TTSProvider),
+      category: 'voice',
+      keywords: ['tts', 'voice', 'speech', 'cartesia', 'skylar'],
+    },
+    {
       id: 'tts-xiaomi',
       label: 'TTS: Switch to Xiaomi Mimo',
       action: () => actions.onTtsProviderChange('xiaomi' as TTSProvider),

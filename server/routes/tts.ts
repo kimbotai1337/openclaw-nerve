@@ -1,7 +1,7 @@
 /**
  * POST /api/tts — Text-to-speech synthesis.
  *
- * Supports OpenAI TTS, Replicate (Qwen, etc.), and Edge TTS (free, zero-config).
+ * Supports OpenAI TTS, Replicate (Qwen, etc.), Cartesia, Xiaomi, and Edge TTS (free, zero-config).
  * Body: { text: string, provider?: string, model?: string, voice?: string }
  * Response: audio/mpeg binary
  *
@@ -10,7 +10,7 @@
  *  - "openai" → OpenAI TTS (requires OPENAI_API_KEY)
  *  - "replicate" → Replicate-hosted models (requires REPLICATE_API_TOKEN)
  *  - "edge" → Microsoft Edge Read-Aloud TTS (free, no key needed)
- *  - Auto fallback: openai (if key) → replicate (if key) → edge (always available)
+ *  - Auto fallback: openai (if key) → replicate (if key) → cartesia (if key) → edge (always available)
  *
  * Backward compat: provider "qwen" is treated as replicate + model "qwen-tts".
  */
@@ -20,12 +20,13 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import { config } from '../lib/config.js';
-import { getTTSConfig, updateTTSConfig } from '../lib/tts-config.js';
+import { CARTESIA_SKYLAR_VOICE_ID, getTTSConfig, updateTTSConfig } from '../lib/tts-config.js';
 import { getTtsCache, setTtsCache } from '../services/tts-cache.js';
 import { synthesizeOpenAI } from '../services/openai-tts.js';
 import { synthesizeReplicate } from '../services/replicate-tts.js';
 import { synthesizeEdge } from '../services/edge-tts.js';
 import { synthesizeXiaomi } from '../services/xiaomi-tts.js';
+import { synthesizeCartesia } from '../services/cartesia-tts.js';
 import { rateLimitTTS, rateLimitGeneral } from '../middleware/rate-limit.js';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
@@ -41,7 +42,7 @@ const ttsSchema = z.object({
     .refine((s) => s.trim().length > 0, 'Text cannot be empty or whitespace'),
   voice: z.string().optional(),
   // Accept both old ("qwen") and new ("replicate") values
-  provider: z.enum(['openai', 'replicate', 'qwen', 'edge', 'xiaomi']).optional(),
+  provider: z.enum(['openai', 'replicate', 'qwen', 'edge', 'xiaomi', 'cartesia']).optional(),
   model: z.string().optional(),
 });
 
@@ -72,29 +73,35 @@ app.post(
       // Voice is passed through — each provider resolves its own default from config
       const voice = rawVoice;
 
-      // Resolve effective provider: explicit > openai (if key) > replicate (if key) > edge
+      // Resolve effective provider: explicit > openai (if key) > replicate (if key) > cartesia (if key) > edge
       const useXiaomi = provider === 'xiaomi';
+      const useCartesia =
+        provider === 'cartesia' ||
+        (!provider && !config.openaiApiKey && !config.replicateApiToken && !!config.cartesiaApiKey);
       const useReplicate =
         provider === 'replicate' ||
         (!provider && !config.openaiApiKey && !!config.replicateApiToken);
       const useEdge =
         provider === 'edge' ||
-        (!provider && !config.openaiApiKey && !config.replicateApiToken);
+        (!provider && !config.openaiApiKey && !config.replicateApiToken && !config.cartesiaApiKey);
       const effectiveProvider = useXiaomi
         ? 'xiaomi'
-        : useEdge
-          ? 'edge'
-          : useReplicate
-            ? 'replicate'
-            : 'openai';
+        : useCartesia
+          ? 'cartesia'
+          : useEdge
+            ? 'edge'
+            : useReplicate
+              ? 'replicate'
+              : 'openai';
       console.log(`[tts] provider=${effectiveProvider} voice=${voice} text="${text.slice(0, 50)}..."`);
 
       const xiaomiStyle = effectiveProvider === 'xiaomi' ? getTTSConfig().xiaomi.style : '';
+      const cacheVoice = effectiveProvider === 'cartesia' ? CARTESIA_SKYLAR_VOICE_ID : (voice || '');
 
-      // Cache key includes provider + model + voice and Xiaomi style for proper isolation
+      // Cache key includes provider + model + effective voice and provider-specific style metadata for proper isolation.
       const hash = crypto
         .createHash('md5')
-        .update(`${effectiveProvider}:${model || ''}:${voice || ''}:${xiaomiStyle}:${text}`)
+        .update(`${effectiveProvider}:${model || ''}:${cacheVoice}:${xiaomiStyle}:${text}`)
         .digest('hex');
 
       const cached = getTtsCache(hash);
@@ -107,6 +114,8 @@ app.post(
       let result;
       if (effectiveProvider === 'xiaomi') {
         result = await synthesizeXiaomi(text, { model, voice });
+      } else if (effectiveProvider === 'cartesia') {
+        result = await synthesizeCartesia(text, { model, voice });
       } else if (effectiveProvider === 'edge') {
         result = await synthesizeEdge(text, voice);
       } else if (effectiveProvider === 'replicate') {
@@ -144,6 +153,7 @@ const TTS_CONFIG_SCHEMA: Record<string, string[]> = {
   openai: ['model', 'voice', 'instructions'],
   edge: ['voice'],
   xiaomi: ['model', 'voice', 'style'],
+  cartesia: ['model'],
 };
 
 /** Validate TTS config patch — only allow known keys with string values */
@@ -160,6 +170,7 @@ function validateTTSPatch(patch: unknown): string | null {
     for (const [subKey, subVal] of Object.entries(val as Record<string, unknown>)) {
       if (!allowed.includes(subKey)) return `Unknown key: "${key}.${subKey}"`;
       if (typeof subVal !== 'string') return `"${key}.${subKey}" must be a string`;
+      if (key === 'cartesia' && subKey !== 'model') return 'Cartesia voice is locked to Skylar';
       if (subVal.length > 2000) return `"${key}.${subKey}" exceeds max length (2000)`;
     }
   }

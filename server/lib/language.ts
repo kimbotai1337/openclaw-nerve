@@ -32,7 +32,7 @@ export function getQwen3Language(langCode: string): string | null {
 
 /** Check if a language is supported by a given provider. */
 export function isLanguageSupported(
-  provider: 'edge' | 'qwen3' | 'openai',
+  provider: 'edge' | 'qwen3' | 'openai' | 'cartesia',
   langCode: string,
 ): boolean {
   const lang = resolveLanguage(langCode);
@@ -47,6 +47,9 @@ export function isLanguageSupported(
     case 'openai':
       // OpenAI TTS auto-detects language from input text
       return true;
+    case 'cartesia':
+      // Sonic 3.5 supports the same language set Nerve currently exposes.
+      return true;
     default:
       return false;
   }
@@ -58,7 +61,7 @@ export function getFallbackInfo(
   langCode: string,
 ): { supported: boolean; fallbackLang: string; warning?: string } {
   const mapped = provider === 'replicate' ? 'qwen3' : provider;
-  const supported = isLanguageSupported(mapped as 'edge' | 'qwen3' | 'openai', langCode);
+  const supported = isLanguageSupported(mapped as 'edge' | 'qwen3' | 'openai' | 'cartesia', langCode);
   const lang = resolveLanguage(langCode);
   const langName = lang?.name || langCode;
 

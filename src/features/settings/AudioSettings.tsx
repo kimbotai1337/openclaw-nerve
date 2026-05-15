@@ -21,7 +21,7 @@ interface LanguageInfo {
 interface LanguageState {
   language: string;
   supported: LanguageInfo[];
-  providers: { edge: boolean; qwen3: boolean; openai: boolean };
+  providers: { edge: boolean; qwen3: boolean; openai: boolean; cartesia?: boolean };
 }
 
 interface LanguageSupportEntry {
@@ -30,7 +30,7 @@ interface LanguageSupportEntry {
   nativeName: string;
   edgeTtsVoices: { female: string; male: string };
   stt: { local: boolean; openai: boolean };
-  tts: { edge: boolean; qwen3: boolean; openai: boolean };
+  tts: { edge: boolean; qwen3: boolean; openai: boolean; cartesia?: boolean };
 }
 
 interface EdgeVoiceOption {
@@ -352,7 +352,7 @@ function ApiKeyInput({
 }: {
   keyName: string;
   provider: string;
-  fieldName: 'openaiKey' | 'replicateToken' | 'mimoApiKey';
+  fieldName: 'openaiKey' | 'replicateToken' | 'mimoApiKey' | 'cartesiaApiKey';
   onSaved: () => void;
 }) {
   const [value, setValue] = useState('');
@@ -425,6 +425,9 @@ const PROVIDER_MODELS: Record<TTSProvider, { value: string; label: string }[]> =
   xiaomi: [
     { value: 'mimo-v2-tts', label: 'mimo-v2-tts' },
   ],
+  cartesia: [
+    { value: 'sonic-3.5', label: 'sonic-3.5 (default)' },
+  ],
   edge: [],
 };
 
@@ -465,7 +468,12 @@ export function AudioSettings({
   const { state: langState, support, isMultilingual, setLanguage } = useLanguage();
 
   // Fetch API key status once on mount
-  const [apiKeys, setApiKeys] = useState<{ openai: boolean; replicate: boolean; xiaomi: boolean }>({ openai: true, replicate: true, xiaomi: true });
+  const [apiKeys, setApiKeys] = useState<{ openai: boolean; replicate: boolean; xiaomi: boolean; cartesia: boolean }>({
+    openai: true,
+    replicate: true,
+    xiaomi: true,
+    cartesia: true,
+  });
   useEffect(() => {
     fetch('/api/keys')
       .then((r) => r.json())
@@ -474,6 +482,7 @@ export function AudioSettings({
           openai: !!data.openaiKeySet,
           replicate: !!data.replicateKeySet,
           xiaomi: !!data.xiaomiKeySet,
+          cartesia: !!data.cartesiaKeySet,
         });
       })
       .catch(() => {});
@@ -750,6 +759,14 @@ export function AudioSettings({
             </button>
             <button
               type="button"
+              onClick={() => onTtsProviderChange('cartesia')}
+              data-active={ttsProvider === 'cartesia'}
+              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+            >
+              Cartesia
+            </button>
+            <button
+              type="button"
               onClick={() => onTtsProviderChange('xiaomi')}
               data-active={ttsProvider === 'xiaomi'}
               className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
@@ -783,6 +800,9 @@ export function AudioSettings({
       {showOutput && ttsProvider === 'xiaomi' && !apiKeys.xiaomi && (
         <ApiKeyInput keyName="MIMO_API_KEY" provider="Xiaomi Mimo" fieldName="mimoApiKey" onSaved={() => setApiKeys(k => ({ ...k, xiaomi: true }))} />
       )}
+      {showOutput && ttsProvider === 'cartesia' && !apiKeys.cartesia && (
+        <ApiKeyInput keyName="CARTESIA_API_KEY" provider="Cartesia TTS" fieldName="cartesiaApiKey" onSaved={() => setApiKeys(k => ({ ...k, cartesia: true }))} />
+      )}
 
       {/* TTS Model (shown when provider has multiple models) */}
       {showOutput && models.length > 0 && (
@@ -792,10 +812,15 @@ export function AudioSettings({
             <p className="mt-1 text-xs text-muted-foreground">Select the synthesis model exposed by the active provider.</p>
           </div>
           <InlineSelect
-            value={ttsProvider === 'xiaomi' ? (ttsModel || config?.xiaomi.model || '') : ttsModel}
+            value={ttsProvider === 'xiaomi'
+              ? (ttsModel || config?.xiaomi.model || '')
+              : ttsProvider === 'cartesia'
+                ? (ttsModel || config?.cartesia.model || '')
+                : ttsModel}
             onChange={(value) => {
               onTtsModelChange(value);
               if (ttsProvider === 'xiaomi') updateField('xiaomi', 'model', value);
+              if (ttsProvider === 'cartesia') updateField('cartesia', 'model', value);
             }}
             options={models}
             ariaLabel="TTS Model"
@@ -900,6 +925,23 @@ export function AudioSettings({
                 placeholder="Happy, whisper, calm, dramatic..."
               />
             </>
+          )}
+
+          {ttsProvider === 'cartesia' && (
+            <div className="cockpit-row items-start justify-between">
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-foreground">Voice</span>
+                <p className="mt-1 text-xs text-muted-foreground">Cartesia output is locked to Skylar for now.</p>
+              </div>
+              <InlineSelect
+                value={config.cartesia.voiceId}
+                onChange={() => undefined}
+                options={[{ value: config.cartesia.voiceId, label: 'Skylar' }]}
+                ariaLabel="Cartesia Voice"
+                triggerClassName={`${INLINE_SELECT_TRIGGER_CLASS} min-w-[188px]`}
+                menuClassName={`${INLINE_SELECT_MENU_CLASS} min-w-[188px]`}
+              />
+            </div>
           )}
         </div>
       )}

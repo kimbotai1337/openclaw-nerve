@@ -19,6 +19,8 @@ describe('TTS routes', () => {
     openaiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
     replicateResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
     xiaomiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
+    cartesiaKey?: string;
+    cartesiaResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
   } = {}) {
     vi.doMock('../lib/config.js', () => ({
       config: {
@@ -26,6 +28,7 @@ describe('TTS routes', () => {
         openaiApiKey: overrides.openaiKey || '',
         replicateApiToken: overrides.replicateToken || '',
         mimoApiKey: overrides.mimoKey || '',
+        cartesiaApiKey: overrides.cartesiaKey || '',
       },
       SESSION_COOKIE_NAME: 'nerve_session_3000',
     }));
@@ -57,12 +60,19 @@ describe('TTS routes', () => {
         overrides.xiaomiResult || { ok: true, buf: Buffer.from('RIFFdemo'), contentType: 'audio/wav' }
       ),
     }));
+    vi.doMock('../services/cartesia-tts.js', () => ({
+      synthesizeCartesia: vi.fn(async () =>
+        overrides.cartesiaResult || { ok: true, buf: Buffer.from('ID3demo'), contentType: 'audio/mpeg' }
+      ),
+    }));
     vi.doMock('../lib/tts-config.js', () => ({
+      CARTESIA_SKYLAR_VOICE_ID: 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4',
       getTTSConfig: vi.fn(() => ({
         openai: { voice: 'alloy', model: 'tts-1', instructions: '' },
         edge: { voice: 'en-US-JennyNeural' },
         qwen: {},
         xiaomi: { model: 'mimo-v2-tts', voice: 'mimo_default', style: 'Happy' },
+        cartesia: { model: 'sonic-3.5', voice: 'Skylar', voiceId: 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4' },
       })),
       updateTTSConfig: vi.fn((patch: unknown) => patch),
     }));
@@ -167,6 +177,41 @@ describe('TTS routes', () => {
       expect(res.status).toBe(502);
     });
 
+    it('uses explicit Cartesia provider and returns MP3 audio', async () => {
+      mockDeps({ cartesiaKey: 'sk-car-test' });
+      const app = await buildApp();
+      const res = await app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', provider: 'cartesia' }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
+    });
+
+    it('uses Cartesia as automatic fallback before Edge when only Cartesia key is set', async () => {
+      mockDeps({ cartesiaKey: 'sk-car-test' });
+      const app = await buildApp();
+      const res = await app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello' }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
+    });
+
+    it('returns Cartesia provider errors', async () => {
+      mockDeps({ cartesiaResult: { ok: false, message: 'Cartesia failed', status: 502 } });
+      const app = await buildApp();
+      const res = await app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', provider: 'cartesia' }),
+      });
+      expect(res.status).toBe(502);
+    });
+
     it('returns error from provider failure', async () => {
       mockDeps({ edgeResult: { ok: false, message: 'Edge TTS failed', status: 500 } });
       const app = await buildApp();
@@ -234,6 +279,28 @@ describe('TTS routes', () => {
         body: JSON.stringify({ xiaomi: { model: 'mimo-v2-tts', voice: 'default_en', style: 'Happy' } }),
       });
       expect(res.status).toBe(200);
+    });
+
+    it('accepts valid Cartesia config patch', async () => {
+      mockDeps();
+      const app = await buildApp();
+      const res = await app.request('/api/tts/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartesia: { model: 'sonic-3.5' } }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects Cartesia voice changes', async () => {
+      mockDeps();
+      const app = await buildApp();
+      const res = await app.request('/api/tts/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartesia: { voiceId: 'not-skylar' } }),
+      });
+      expect(res.status).toBe(400);
     });
 
     it('rejects non-string values', async () => {

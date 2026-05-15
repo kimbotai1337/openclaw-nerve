@@ -14,7 +14,7 @@ if (typeof document !== 'undefined') {
   events.forEach(e => document.addEventListener(e, handler, { capture: true, once: false }));
 }
 
-export type TTSProvider = 'openai' | 'replicate' | 'edge' | 'xiaomi';
+export type TTSProvider = 'openai' | 'replicate' | 'edge' | 'xiaomi' | 'cartesia';
 
 /** @deprecated Use 'replicate' instead. Kept for migration. */
 export type LegacyTTSProvider = 'qwen';
@@ -22,7 +22,7 @@ export type LegacyTTSProvider = 'qwen';
 /** Migrate legacy provider names to current ones. */
 export function migrateTTSProvider(provider: string): TTSProvider {
   if (provider === 'qwen') return 'replicate';
-  if (provider === 'openai' || provider === 'replicate' || provider === 'edge' || provider === 'xiaomi') return provider;
+  if (provider === 'openai' || provider === 'replicate' || provider === 'edge' || provider === 'xiaomi' || provider === 'cartesia') return provider;
   return 'openai';
 }
 

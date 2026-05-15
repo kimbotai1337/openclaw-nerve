@@ -51,6 +51,7 @@ export const config = {
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   replicateApiToken: process.env.REPLICATE_API_TOKEN || '',
   mimoApiKey: process.env.MIMO_API_KEY || '',
+  cartesiaApiKey: process.env.CARTESIA_API_KEY || '',
 
   // Speech-to-text
   sttProvider: (process.env.STT_PROVIDER || 'local') as 'local' | 'openai',
@@ -174,9 +175,13 @@ export const WS_ALLOWED_HOSTS = new Set([
 
 /** Resolve the TTS provider label for the startup banner. */
 function ttsProviderLabel(): string {
-  if (config.openaiApiKey && config.replicateApiToken) return 'OpenAI + Replicate + Edge';
-  if (config.openaiApiKey) return 'OpenAI + Edge';
-  if (config.replicateApiToken) return 'Replicate + Edge';
+  const providers = [
+    config.openaiApiKey ? 'OpenAI' : null,
+    config.replicateApiToken ? 'Replicate' : null,
+    config.cartesiaApiKey ? 'Cartesia' : null,
+  ].filter(Boolean);
+
+  if (providers.length > 0) return `${providers.join(' + ')} + Edge`;
   return 'Edge (free)';
 }
 
@@ -264,6 +269,9 @@ export function validateConfig(): void {
   }
   if (!config.replicateApiToken) {
     console.warn('[config] ⚠ REPLICATE_API_TOKEN not set — Qwen TTS unavailable');
+  }
+  if (!config.cartesiaApiKey) {
+    console.warn('[config] ⚠ CARTESIA_API_KEY not set — Cartesia TTS unavailable');
   }
   if (!process.env.NERVE_LANGUAGE && process.env.LANGUAGE) {
     console.warn('[config] ⚠ LANGUAGE is deprecated — use NERVE_LANGUAGE instead');

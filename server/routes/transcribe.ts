@@ -168,6 +168,7 @@ app.get('/api/language', rateLimitGeneral, (c) => {
       edge: isLanguageSupported('edge', config.language),
       qwen3: isLanguageSupported('qwen3', config.language),
       openai: isLanguageSupported('openai', config.language),
+      cartesia: isLanguageSupported('cartesia', config.language),
     },
   });
 });

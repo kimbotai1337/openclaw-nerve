@@ -19,6 +19,7 @@ app.get('/api/keys', rateLimitGeneral, (c) => {
     openaiKeySet: !!config.openaiApiKey,
     replicateKeySet: !!config.replicateApiToken,
     xiaomiKeySet: !!config.mimoApiKey,
+    cartesiaKeySet: !!config.cartesiaApiKey,
   });
 });
 
@@ -50,12 +51,20 @@ app.put('/api/keys', rateLimitGeneral, async (c) => {
       results.push(val ? 'MIMO_API_KEY saved' : 'MIMO_API_KEY cleared');
     }
 
+    if (body.cartesiaApiKey !== undefined) {
+      const val = body.cartesiaApiKey.trim();
+      await writeEnvKey('CARTESIA_API_KEY', val);
+      (config as Record<string, unknown>).cartesiaApiKey = val;
+      results.push(val ? 'CARTESIA_API_KEY saved' : 'CARTESIA_API_KEY cleared');
+    }
+
     return c.json({
       ok: true,
       message: results.join(', ') || 'No changes',
       openaiKeySet: !!config.openaiApiKey,
       replicateKeySet: !!config.replicateApiToken,
       xiaomiKeySet: !!config.mimoApiKey,
+      cartesiaKeySet: !!config.cartesiaApiKey,
     });
   } catch {
     return c.text('Invalid request', 400);

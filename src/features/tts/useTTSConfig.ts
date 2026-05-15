@@ -21,6 +21,11 @@ export interface TTSVoiceConfig {
     voice: string;
     style: string;
   };
+  cartesia: {
+    model: string;
+    voice: 'Skylar';
+    voiceId: string;
+  };
 }
 
 interface UseTTSConfigReturn {

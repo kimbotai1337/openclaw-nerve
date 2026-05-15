@@ -86,6 +86,10 @@ describe('migrateTTSProvider', () => {
     expect(migrateTTSProvider('xiaomi')).toBe('xiaomi');
   });
 
+  it('should keep "cartesia" as-is', () => {
+    expect(migrateTTSProvider('cartesia')).toBe('cartesia');
+  });
+
   it('should default unknown values to "openai"', () => {
     expect(migrateTTSProvider('unknown')).toBe('openai');
     expect(migrateTTSProvider('')).toBe('openai');

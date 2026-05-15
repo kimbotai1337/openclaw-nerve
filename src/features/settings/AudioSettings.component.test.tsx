@@ -18,6 +18,7 @@ vi.mock('@/features/tts/useTTSConfig', () => ({
       openai: { model: 'tts-1', voice: 'alloy', instructions: '' },
       qwen: { mode: 'voice_design', language: 'English', speaker: 'Serena', voiceDescription: '', styleInstruction: '' },
       xiaomi: { model: 'mimo-v2-tts', voice: 'mimo_default', style: '' },
+      cartesia: { model: 'sonic-3.5', voice: 'Skylar', voiceId: 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4' },
     },
     saved: true,
     updateField,
@@ -72,11 +73,12 @@ function mockWakeWordSupport(result: { supported: boolean; reason: 'mobile-web' 
   (wakeWordSupport.isWakeWordSupportedEnvironment as Mock).mockReturnValue(result.supported);
 }
 
-type ApiKeyState = { openaiKeySet: boolean; replicateKeySet: boolean; xiaomiKeySet: boolean; hasGpu: boolean };
+type ApiKeyState = { openaiKeySet: boolean; replicateKeySet: boolean; xiaomiKeySet: boolean; cartesiaKeySet: boolean; hasGpu: boolean };
 let apiKeyState: ApiKeyState = {
   openaiKeySet: true,
   replicateKeySet: true,
   xiaomiKeySet: false,
+  cartesiaKeySet: false,
   hasGpu: false,
 };
 
@@ -88,6 +90,7 @@ describe('AudioSettings', () => {
       openaiKeySet: true,
       replicateKeySet: true,
       xiaomiKeySet: false,
+      cartesiaKeySet: false,
       hasGpu: false,
     };
 
@@ -114,7 +117,7 @@ describe('AudioSettings', () => {
           json: () => Promise.resolve({
             language: 'en',
             supported: [{ code: 'en', name: 'English', nativeName: 'English' }],
-            providers: { edge: true, qwen3: true, openai: true },
+            providers: { edge: true, qwen3: true, openai: true, cartesia: true },
           }),
         } as Response);
       }
@@ -210,6 +213,30 @@ describe('AudioSettings', () => {
       fireEvent.change(screen.getByPlaceholderText('Happy, whisper, calm, dramatic...'), { target: { value: 'Happy' } });
 
       expect(updateField).toHaveBeenCalledWith('xiaomi', 'style', 'Happy');
+    });
+  });
+
+  describe('Cartesia output settings', () => {
+    it('renders a Cartesia provider button', async () => {
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="cartesia" ttsModel="" />);
+      expect(await screen.findByRole('button', { name: 'Cartesia' })).toBeInTheDocument();
+    });
+
+    it('shows the Cartesia API key prompt when Cartesia is selected and the key is missing', async () => {
+      apiKeyState.cartesiaKeySet = false;
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="cartesia" ttsModel="" />);
+
+      expect(await screen.findByText(/CARTESIA_API_KEY required for Cartesia TTS/i)).toBeInTheDocument();
+    });
+
+    it('renders Cartesia model selector and only the Skylar voice', async () => {
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="cartesia" ttsModel="sonic-3.5" />);
+
+      expect(await screen.findByLabelText('TTS Model')).toHaveValue('sonic-3.5');
+      expect(screen.getByLabelText('Cartesia Voice')).toHaveValue('db6b0ed5-d5d3-463d-ae85-518a07d3c2b4');
+      expect(screen.getByRole('option', { name: 'sonic-3.5 (default)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Skylar' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /Katie/i })).not.toBeInTheDocument();
     });
   });
 });

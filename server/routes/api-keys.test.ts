@@ -11,11 +11,12 @@ describe('api-keys routes', () => {
     vi.restoreAllMocks();
   });
 
-  function mockDeps(overrides: { mimoKey?: string } = {}) {
+  function mockDeps(overrides: { mimoKey?: string; cartesiaKey?: string } = {}) {
     const mockConfig: Record<string, unknown> = {
       openaiApiKey: '',
       replicateApiToken: '',
       mimoApiKey: overrides.mimoKey || '',
+      cartesiaApiKey: overrides.cartesiaKey || '',
     };
 
     vi.doMock('../lib/config.js', () => ({
@@ -38,8 +39,8 @@ describe('api-keys routes', () => {
     return app;
   }
 
-  it('reports xiaomiKeySet from config', async () => {
-    mockDeps({ mimoKey: 'sk-mimo' });
+  it('reports xiaomiKeySet and cartesiaKeySet from config', async () => {
+    mockDeps({ mimoKey: 'sk-mimo', cartesiaKey: 'sk-car-test' });
     const app = await buildApp();
 
     const res = await app.request('/api/keys');
@@ -47,6 +48,7 @@ describe('api-keys routes', () => {
 
     const json = await res.json() as Record<string, unknown>;
     expect(json.xiaomiKeySet).toBe(true);
+    expect(json.cartesiaKeySet).toBe(true);
   });
 
   it('writes MIMO_API_KEY from mimoApiKey input', async () => {
@@ -64,5 +66,22 @@ describe('api-keys routes', () => {
     const json = await res.json() as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.xiaomiKeySet).toBe(true);
+  });
+
+  it('writes CARTESIA_API_KEY from cartesiaApiKey input', async () => {
+    mockDeps();
+    const app = await buildApp();
+
+    const res = await app.request('/api/keys', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cartesiaApiKey: 'sk-car-test' }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json() as Record<string, unknown>;
+    expect(json.ok).toBe(true);
+    expect(json.cartesiaKeySet).toBe(true);
   });
 });

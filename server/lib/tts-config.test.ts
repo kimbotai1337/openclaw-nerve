@@ -57,7 +57,7 @@ async function loadTtsModule(opts: {
 }
 
 describe('getTTSConfig', () => {
-  it('returns Xiaomi defaults when config file is missing', async () => {
+  it('returns Xiaomi and Cartesia defaults when config file is missing', async () => {
     const mod = await loadTtsModule({
       language: 'en',
       edgeVoiceGender: 'female',
@@ -68,6 +68,9 @@ describe('getTTSConfig', () => {
     expect(cfg.xiaomi.model).toBe('mimo-v2-tts');
     expect(cfg.xiaomi.voice).toBe('mimo_default');
     expect(cfg.xiaomi.style).toBe('');
+    expect(cfg.cartesia.model).toBe('sonic-3.5');
+    expect(cfg.cartesia.voice).toBe('Skylar');
+    expect(cfg.cartesia.voiceId).toBe('db6b0ed5-d5d3-463d-ae85-518a07d3c2b4');
   });
 
   it('deep-merges Xiaomi patches without dropping defaults', async () => {
