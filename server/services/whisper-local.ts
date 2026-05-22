@@ -7,9 +7,9 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { writeFileSync, unlinkSync, accessSync, mkdirSync, createWriteStream } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir, cpus } from 'node:os';
+import { writeFileSync, unlinkSync, accessSync, mkdirSync, createWriteStream, readdirSync } from 'node:fs';
+import { join, delimiter as pathDelimiter } from 'node:path';
+import { tmpdir, cpus, availableParallelism } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { initWhisper } from '@fugood/whisper.node';
 import type { WhisperContext, TranscribeOptions } from '@fugood/whisper.node';
@@ -80,10 +80,25 @@ async function getContext(): Promise<WhisperContext> {
   const useGpu = process.platform !== 'linux' || hasVulkanBackend();
   const backend = process.platform === 'linux' && useGpu ? 'vulkan' : undefined;
 
-  contextInitializing = initWhisper({
-    filePath: modelPath(),
-    useGpu, // Metal on macOS; Vulkan on Linux when present; CPU fallback elsewhere
-  }, backend).then((ctx) => {
+  // initWhisper throws synchronously inside the promise if the requested
+  // backend can't initialize (e.g., the ICD manifest probe matched a stale
+  // JSON whose driver library isn't loadable). Fall back to CPU once if the
+  // Vulkan path fails — the probes are heuristics, not load-time guarantees.
+  const initWithFallback = async (): Promise<WhisperContext> => {
+    try {
+      return await initWhisper({ filePath: modelPath(), useGpu }, backend);
+    } catch (err) {
+      if (backend !== 'vulkan') throw err;
+      console.warn(
+        `[whisper-local] Vulkan init failed, retrying on CPU: ${(err as Error).message}`,
+      );
+      vulkanBackendAvailable = false; // poison the cache so future inits skip the probe
+      gpuDetected = null; // force detectGpu() to recompute so getSystemInfo() reports the post-fallback state
+      return initWhisper({ filePath: modelPath(), useGpu: false });
+    }
+  };
+
+  contextInitializing = initWithFallback().then((ctx) => {
     whisperContext = ctx;
     contextInitializing = null;
     console.log(`[whisper-local] Model loaded: ${activeModel}`);
@@ -279,15 +294,58 @@ export async function setWhisperModel(model: string): Promise<{ ok: boolean; mes
 let gpuDetected: boolean | null = null;
 let vulkanBackendAvailable: boolean | null = null;
 
-/** Probe for a Vulkan ICD/runtime specifically — the stricter check needed before passing 'vulkan' to initWhisper. */
+/** Standard Vulkan loader ICD manifest directories per the Vulkan-Loader spec. */
+const VULKAN_ICD_DIRS = [
+  '/usr/share/vulkan/icd.d',
+  '/usr/local/share/vulkan/icd.d',
+  '/etc/vulkan/icd.d',
+];
+
+/**
+ * Detect a Vulkan ICD via manifest enumeration — covers slim containers that ship
+ * libvulkan + ICD JSONs but omit the `vulkan-tools` (`vulkaninfo`) CLI package.
+ * Honors `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` overrides as the loader does.
+ */
+function hasVulkanIcdManifest(): boolean {
+  const checkPath = (p: string): boolean => {
+    if (!p) return false;
+    try { accessSync(p); return true; } catch { return false; }
+  };
+  const checkList = (raw: string | undefined): boolean =>
+    // Loader splits these env vars on the OS path-list delimiter (`:` POSIX, `;` Win).
+    // Hardcoding `:` would mangle Windows entries like `C:\drivers\nvidia.json`.
+    raw ? raw.split(pathDelimiter).some(checkPath) : false;
+
+  // VK_DRIVER_FILES / legacy VK_ICD_FILENAMES *replace* the loader's default search.
+  const replace = (process.env.VK_DRIVER_FILES ?? process.env.VK_ICD_FILENAMES)?.trim();
+  if (replace) return checkList(replace);
+
+  // VK_ADD_DRIVER_FILES is *additive* on top of the default search.
+  if (checkList(process.env.VK_ADD_DRIVER_FILES?.trim())) return true;
+
+  return VULKAN_ICD_DIRS.some(dir => {
+    try {
+      return readdirSync(dir).some(f => f.endsWith('.json'));
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Probe for a Vulkan ICD/runtime — the stricter check needed before passing 'vulkan'
+ * to initWhisper. Prefers `vulkaninfo --summary` (most authoritative), then falls
+ * back to ICD manifest enumeration so slim Linux containers with the runtime but
+ * no CLI tools still light up the GPU path.
+ */
 function hasVulkanBackend(): boolean {
   if (vulkanBackendAvailable !== null) return vulkanBackendAvailable;
   try {
     execSync('vulkaninfo --summary', { stdio: 'pipe', timeout: 3000 });
     vulkanBackendAvailable = true;
-  } catch {
-    vulkanBackendAvailable = false;
-  }
+    return vulkanBackendAvailable;
+  } catch { /* fall through */ }
+  vulkanBackendAvailable = hasVulkanIcdManifest();
   return vulkanBackendAvailable;
 }
 
@@ -416,7 +474,10 @@ export async function transcribeLocal(
     const transcribeOpts: TranscribeOptions = {
       temperature: 0.0,
       language: whisperLang,
-      maxThreads: cpus().length,
+      // availableParallelism honors cgroup CPU quota on Linux (libuv reads
+      // cgroup v1/v2 CFS limits + sched_getaffinity); cpus().length over-allocates
+      // worker threads inside containers with a CPU quota smaller than the host.
+      maxThreads: availableParallelism(),
     };
     const { promise } = ctx.transcribeFile(wavTmp, transcribeOpts);
 
