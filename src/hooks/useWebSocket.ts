@@ -266,11 +266,14 @@ export function useWebSocket(): UseWebSocketReturn {
       };
 
       ws.onclose = () => {
+        // Stale connection: a newer doConnect has already superseded this one.
+        // Guard BEFORE touching shared refs - otherwise a late close from the
+        // previous socket clobbers the current attempt's timeout and pending
+        // RPCs, reintroducing the hang/drop race during overlapping reconnects.
+        if (gen !== connectionGenRef.current) return;
+
         clearConnectTimeout();
         rejectPending(new Error('WebSocket disconnected'));
-
-        // Stale connection: a newer doConnect has already superseded this one
-        if (gen !== connectionGenRef.current) return;
 
         if (connectRejectRef.current) {
           settleConnectFailure(new Error('WebSocket disconnected before connect completed'));

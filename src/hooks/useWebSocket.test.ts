@@ -288,13 +288,16 @@ describe('useWebSocket', () => {
         firstWs.simulateMessage({ type: 'res', id: firstReqId, ok: true, payload: {} });
       });
 
-      // unexpected close triggers reconnect
+      // unexpected close triggers reconnect. Advance only enough to fire the
+      // reconnect delay (~1000-1500ms) without letting the new socket's
+      // CONNECT_TIMEOUT_MS (10s) fire, which would close it and cause an
+      // infinite reconnect loop under correct stale-onclose handling.
       act(() => {
         firstWs.close();
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
       });
 
       expect(wsInstances.length).toBeGreaterThanOrEqual(2);
@@ -358,13 +361,14 @@ describe('useWebSocket', () => {
         simulateAuthHandshake(firstWs);
       });
 
-      // Simulate unexpected close
+      // Simulate unexpected close. Advance just past the reconnect delay
+      // without letting the new socket's CONNECT_TIMEOUT_MS (10s) fire.
       act(() => {
         firstWs.close();
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
       });
 
       expect(result.current.connectionState).toBe('reconnecting');
@@ -455,12 +459,15 @@ describe('useWebSocket', () => {
         simulateAuthHandshake(firstWs);
       });
 
+      // Advance only past the reconnect delay so the new ws is created without
+      // letting its CONNECT_TIMEOUT_MS fire (which would otherwise loop forever
+      // now that stale onclose no longer clobbers the new socket's timeout).
       act(() => {
         firstWs.close();
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
       });
 
       expect(wsInstances.length).toBeGreaterThanOrEqual(2);
@@ -482,8 +489,9 @@ describe('useWebSocket', () => {
         });
       });
 
+      // Auth failure triggers another reconnect; advance past that delay too.
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(3000);
       });
 
       expect(result.current.connectionState).toBe('reconnecting');
